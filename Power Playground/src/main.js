@@ -346,43 +346,78 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
     }
 
     const floorTileTexture = createPatternTexture(7, 7, (context) => {
-      context.fillStyle = "#f5f7fa";
+      context.fillStyle = "#ffffff";
       context.fillRect(0, 0, 256, 256);
-      context.strokeStyle = "#cbd3dd";
-      context.lineWidth = 3;
+      context.strokeStyle = "#dce6f0";
+      context.lineWidth = 2;
       [0, 128, 256].forEach((point) => {
         context.beginPath(); context.moveTo(point, 0); context.lineTo(point, 256); context.stroke();
         context.beginPath(); context.moveTo(0, point); context.lineTo(256, point); context.stroke();
       });
-      addTextureSpeckles(context, 90, "rgba(100,116,139,.16)", 11, 1.1);
+      addTextureSpeckles(context, 60, "rgba(100,116,139,.09)", 11, 0.9);
     });
-    const wallPanelTexture = createPatternTexture(5, 3, (context) => {
-      context.fillStyle = "#f7f9fc";
+    function paintWallPanelTexture(context, label) {
+      context.fillStyle = "#fbfdff";
       context.fillRect(0, 0, 256, 256);
-      context.strokeStyle = "#c3ccd8";
-      context.lineWidth = 4;
-      context.strokeRect(3, 3, 250, 250);
-      context.beginPath(); context.moveTo(128, 3); context.lineTo(128, 253); context.stroke();
-      context.fillStyle = "rgba(148,163,184,.38)";
-      [[14,14], [242,14], [14,242], [242,242]].forEach(([x, y]) => { context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); });
+      context.strokeStyle = "#aebdcd";
+      context.lineWidth = 8;
+      context.strokeRect(5, 5, 246, 246);
+      context.strokeStyle = "#d3dde7";
+      context.lineWidth = 5;
+      context.strokeRect(20, 20, 216, 216);
+      context.beginPath();
+      context.moveTo(24, 24); context.lineTo(232, 232);
+      context.moveTo(232, 24); context.lineTo(24, 232);
+      context.stroke();
+      context.fillStyle = "#7f91a5";
+      [[17,17], [239,17], [17,239], [239,239]].forEach(([x, y]) => { context.beginPath(); context.arc(x, y, 5, 0, Math.PI * 2); context.fill(); });
+      context.fillStyle = "#2563eb";
+      context.fillRect(28, 28, 42, 9);
+      context.fillStyle = "#64748b";
+      context.font = "bold 18px ui-monospace, monospace";
+      context.fillText(label, 28, 62);
+      for (let x = 24; x < 232; x += 32) {
+        context.fillStyle = x % 64 === 24 ? "#facc15" : "#334155";
+        context.fillRect(x, 218, 32, 12);
+      }
+    }
+    const wallPanelTexture = createPatternTexture(10, 6, (context) => {
+      paintWallPanelTexture(context, "P-01");
     });
+    const structurePanelTexture = wallPanelTexture.clone();
+    structurePanelTexture.repeat.set(2, 2);
+    structurePanelTexture.needsUpdate = true;
+
+    function updatePrototypePanelLabel(power) {
+      const powerNumber = Math.max(1, Object.keys(POWER_DATA).indexOf(power) + 1);
+      const label = `P-${String(powerNumber).padStart(2, "0")}`;
+      const canvas = wallPanelTexture.image;
+      paintWallPanelTexture(canvas.getContext("2d"), label);
+      wallPanelTexture.needsUpdate = true;
+      structurePanelTexture.needsUpdate = true;
+    }
     const concreteTexture = createPatternTexture(4, 4, (context) => {
-      context.fillStyle = "#e0e5eb";
+      context.fillStyle = "#f3f7fb";
       context.fillRect(0, 0, 256, 256);
-      addTextureSpeckles(context, 420, "rgba(71,85,105,.2)", 29, 1.45);
-      addTextureSpeckles(context, 180, "rgba(255,255,255,.34)", 97, 1.1);
+      addTextureSpeckles(context, 300, "rgba(71,85,105,.11)", 29, 1.2);
+      addTextureSpeckles(context, 120, "rgba(255,255,255,.62)", 97, 1.0);
     });
     const crateTexture = createPatternTexture(1, 1, (context) => {
-      context.fillStyle = "#d7e7f7";
+      context.fillStyle = "#f7fbff";
       context.fillRect(0, 0, 256, 256);
-      context.strokeStyle = "#647b96";
-      context.lineWidth = 15;
+      context.strokeStyle = "#86add5";
+      context.lineWidth = 13;
       context.strokeRect(8, 8, 240, 240);
-      context.lineWidth = 10;
+      context.lineWidth = 8;
       context.beginPath(); context.moveTo(18, 18); context.lineTo(238, 238); context.moveTo(238, 18); context.lineTo(18, 238); context.stroke();
-      context.strokeStyle = "rgba(255,255,255,.62)";
+      context.strokeStyle = "rgba(255,255,255,.88)";
       context.lineWidth = 3;
       context.strokeRect(22, 22, 212, 212);
+      context.fillStyle = "#2563eb";
+      context.fillRect(96, 108, 64, 40);
+      context.fillStyle = "#ffffff";
+      context.font = "bold 20px ui-monospace, monospace";
+      context.fillText("TEST", 103, 135);
     });
     const dirtTexture = createPatternTexture(6, 6, (context) => {
       context.fillStyle = "#9b704c";
@@ -426,9 +461,9 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
 
     const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: floorTileTexture, roughness: 0.78, metalness: 0.0 });
     const wallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, map: wallPanelTexture, roughness: 0.82, metalness: 0.0 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: wallPanelTexture, roughness: 0.74, metalness: 0.0, transparent: true, opacity: 0.42 });
-    const obstacleMat = new THREE.MeshStandardMaterial({ color: 0xe6eaf0, map: concreteTexture, roughness: 0.78, metalness: 0.0 });
-    const trimMat = new THREE.MeshStandardMaterial({ color: 0xc7d2e3, map: wallPanelTexture, roughness: 0.7, metalness: 0.0 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.74, metalness: 0.0, transparent: true, opacity: 0.42 });
+    const obstacleMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, map: structurePanelTexture, roughness: 0.72, metalness: 0.02 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0xdbe6f1, map: wallPanelTexture, roughness: 0.7, metalness: 0.0 });
     const dummyMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.6, metalness: 0.0 });
     const dummyAccentMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.52, metalness: 0.0 });
     const movableBoxMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa, map: crateTexture, roughness: 0.62, metalness: 0.0 });
@@ -870,10 +905,10 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
 
     function buildSuperSpeedTrack() {
       const z = 116;
-      const trackFloorMat = new THREE.MeshStandardMaterial({ color: 0xfff7ed, map: floorTileTexture, roughness: 0.78, metalness: 0.0 });
-      const laneMat = new THREE.MeshStandardMaterial({ color: 0xf97316, map: concreteTexture, roughness: 0.74, metalness: 0.0 });
+      const trackFloorMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: floorTileTexture, roughness: 0.76, metalness: 0.0 });
+      const laneMat = new THREE.MeshStandardMaterial({ color: 0xff8a1f, map: concreteTexture, roughness: 0.7, metalness: 0.0 });
       const railMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, map: wallPanelTexture, roughness: 0.72, metalness: 0.0 });
-      const yellowBlockMat = new THREE.MeshStandardMaterial({ color: 0xffea00, map: concreteTexture, roughness: 0.68, metalness: 0.0 });
+      const yellowBlockMat = new THREE.MeshStandardMaterial({ color: 0xfff200, map: structurePanelTexture, roughness: 0.62, metalness: 0.02 });
       addVisualFloor("super speed track floor", 142, 94, new THREE.Vector3(0, 0.004, z), trackFloorMat);
 
       const outerTrack = new THREE.Mesh(new THREE.RingGeometry(17.5, 24, 96, 2), laneMat);
@@ -945,8 +980,8 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
       const z = 219;
       const arenaFloorMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, map: floorTileTexture, roughness: 0.76, metalness: 0.0 });
       const arenaWallMat = new THREE.MeshStandardMaterial({ color: 0xf9fafb, map: wallPanelTexture, roughness: 0.8, metalness: 0.0 });
-      const warningMat = new THREE.MeshStandardMaterial({ color: 0xef4444, map: concreteTexture, roughness: 0.64, metalness: 0.0 });
-      const coverMat = new THREE.MeshStandardMaterial({ color: 0xdbe4ef, map: concreteTexture, roughness: 0.72, metalness: 0.05 });
+      const warningMat = new THREE.MeshStandardMaterial({ color: 0xef4444, map: structurePanelTexture, roughness: 0.62, metalness: 0.03 });
+      const coverMat = new THREE.MeshStandardMaterial({ color: 0xeaf2fb, map: structurePanelTexture, roughness: 0.68, metalness: 0.06 });
 
       addVisualFloor("minion arena floor", 74, 74, new THREE.Vector3(0, 0.006, z), arenaFloorMat);
       addStaticBox("arena north wall", new THREE.Vector3(74, 18, 0.8), new THREE.Vector3(0, 9, z - 37), arenaWallMat);
@@ -1104,12 +1139,11 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
         new THREE.MeshStandardMaterial({ color: 0x668b87, map: facadeTextures[2], roughness: 0.72, metalness: 0.06, emissive: 0x102826, emissiveIntensity: 0.07 }),
         new THREE.MeshStandardMaterial({ color: 0x887a9b, map: facadeTextures[3], roughness: 0.7, metalness: 0.07, emissive: 0x20172b, emissiveIntensity: 0.07 })
       ];
-      const buildingMats = buildingFacadeMats.map((facade, index) => {
+      const buildingMats = buildingFacadeMats.map((facade) => {
         const roof = new THREE.MeshStandardMaterial({
-          color: [0x596675, 0x755d59, 0x55716f, 0x6d6478][index],
-          map: concreteTexture,
+          color: 0xffffff,
           roughness: 0.92,
-          metalness: 0.02
+          metalness: 0.0
         });
         return [facade, facade, roof, roof, facade, facade];
       });
@@ -4128,6 +4162,7 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
 
     function startGame(power) {
       selectedPower = power;
+      updatePrototypePanelLabel(power);
       gameStarted = true;
       gamePaused = false;
       pauseOverlay.hidden = true;
@@ -4271,6 +4306,7 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
         startMenuMusic();
         playSfx("menuTap");
         menuSelectedPower = button.dataset.power;
+        updatePrototypePanelLabel(menuSelectedPower);
         document.querySelectorAll(".powerCard").forEach((item) => item.classList.toggle("chosen", item === button));
         window.setTimeout(() => {
           setMenuStep("map");
