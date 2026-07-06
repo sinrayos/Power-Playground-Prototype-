@@ -16,6 +16,7 @@ import { playSfx } from "./sfx.js";
     let selectedMap = "hub";
     let builtMap = null;
     let gameStarted = false;
+    let gamePaused = false;
     let cameraYaw = Math.PI;
     let cameraPitch = 0.23;
     let cameraDistance = 7.2;
@@ -107,6 +108,10 @@ import { playSfx } from "./sfx.js";
     const chargeFill = document.getElementById("chargeFill");
     const flightBadge = document.getElementById("flightBadge");
     const inventoryHud = document.getElementById("inventoryHud");
+    const pauseOverlay = document.getElementById("pauseOverlay");
+    const resumeButton = document.getElementById("resumeButton");
+    const restartButton = document.getElementById("restartButton");
+    const mainMenuButton = document.getElementById("mainMenuButton");
     const hotbar = document.getElementById("hotbar");
     const bottomHealthFill = document.getElementById("bottomHealthFill");
     const bottomHealthText = document.getElementById("bottomHealthText");
@@ -3819,6 +3824,11 @@ import { playSfx } from "./sfx.js";
       requestAnimationFrame(animate);
       const delta = Math.min(clock.getDelta(), 0.05);
 
+      if (gamePaused) {
+        renderer.render(scene, camera);
+        return;
+      }
+
       updateHeldDummy();
       updateStrengthHeldBox();
       updatePinnedDummy();
@@ -3849,6 +3859,8 @@ import { playSfx } from "./sfx.js";
     function startGame(power) {
       selectedPower = power;
       gameStarted = true;
+      gamePaused = false;
+      pauseOverlay.hidden = true;
       keys.clear();
       flightMode = false;
       divePending = false;
@@ -3888,7 +3900,7 @@ import { playSfx } from "./sfx.js";
       playerParts.aura.material.color.setHex(data.color);
       powerName.textContent = data.name;
       const map = MAP_DATA[selectedMap];
-      powerHelp.textContent = `${map.name}. ${data.help} WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V toggles first person.`;
+      powerHelp.textContent = `${map.name}. ${data.help} WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V toggles first person. Esc pauses.`;
       hud.style.display = "block";
       if (inventoryHud) inventoryHud.style.display = "block";
       fpsCounter.style.display = "block";
@@ -3929,6 +3941,44 @@ import { playSfx } from "./sfx.js";
       renderer.domElement.focus();
     }
 
+    function releaseActiveInputs() {
+      keys.clear();
+      isPointerDown = false;
+      megaLeapCharging = false;
+      rightMouseDragging = false;
+      renderShiftLockState();
+      releaseTelekinesis();
+      endSpiderSwing(false);
+      webPullState = null;
+      webZipState = null;
+      webWallWalkActive = false;
+      webWallLastContactAt = 0;
+      webWallDetachUntil = 0;
+      webLeftDownAt = 0;
+      webHoldTriggered = false;
+      if (webCord) webCord.group.visible = false;
+      if (strengthHeldBox) toggleStrengthBoxGrab();
+      chargeFill.style.width = "0%";
+    }
+
+    function setPaused(paused) {
+      if (!gameStarted || gamePaused === paused) return;
+      gamePaused = paused;
+      releaseActiveInputs();
+      pauseOverlay.hidden = !paused;
+      if (paused) {
+        if (document.pointerLockElement) document.exitPointerLock();
+        resumeButton.focus();
+      } else {
+        clock.getDelta();
+        renderer.domElement.focus();
+      }
+    }
+
+    resumeButton.addEventListener("click", () => setPaused(false));
+    restartButton.addEventListener("click", () => startGame(selectedPower));
+    mainMenuButton.addEventListener("click", () => window.location.reload());
+
     document.querySelectorAll(".mapButton").forEach((button) => {
       button.addEventListener("click", () => {
         selectedMap = button.dataset.map;
@@ -3941,6 +3991,15 @@ import { playSfx } from "./sfx.js";
     });
 
     window.addEventListener("keydown", (event) => {
+      if (event.code === "Escape" && gameStarted && !event.repeat) {
+        event.preventDefault();
+        setPaused(!gamePaused);
+        return;
+      }
+      if (gamePaused) {
+        event.preventDefault();
+        return;
+      }
       keys.add(event.code);
       if (/^Digit[1-9]$/.test(event.code) && gameStarted && !event.repeat) {
         selectHotbarSlot(Number(event.code.slice(5)) - 1);
@@ -3973,32 +4032,17 @@ import { playSfx } from "./sfx.js";
     });
 
     window.addEventListener("keyup", (event) => {
+      if (gamePaused) return;
       keys.delete(event.code);
       if (event.code === "Space" && selectedPower === "webs") endSpiderSwing();
     });
 
     window.addEventListener("blur", () => {
-      keys.clear();
-      isPointerDown = false;
-      megaLeapCharging = false;
-      rightMouseDragging = false;
-      renderShiftLockState();
-      releaseTelekinesis();
-      endSpiderSwing(false);
-      webPullState = null;
-      webZipState = null;
-      webWallWalkActive = false;
-      webWallLastContactAt = 0;
-      webWallDetachUntil = 0;
-      webLeftDownAt = 0;
-      webHoldTriggered = false;
-      if (webCord) webCord.group.visible = false;
-      if (strengthHeldBox) toggleStrengthBoxGrab();
-      chargeFill.style.width = "0%";
+      releaseActiveInputs();
     });
 
     window.addEventListener("mousedown", (event) => {
-      if (!gameStarted) return;
+      if (!gameStarted || gamePaused) return;
       event.preventDefault();
       if (event.button === 2) {
         rightMouseDragging = true;
@@ -4009,6 +4053,7 @@ import { playSfx } from "./sfx.js";
     });
 
     window.addEventListener("mouseup", (event) => {
+      if (gamePaused) return;
       if (event.button === 2) {
         rightMouseDragging = false;
         renderShiftLockState();
@@ -4024,7 +4069,7 @@ import { playSfx } from "./sfx.js";
         mouseNdc.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouseNdc.y = -(event.clientY / window.innerHeight) * 2 + 1;
       }
-      if (!gameStarted) return;
+      if (!gameStarted || gamePaused) return;
       const lockedMouseLook = shiftLockMode || (
         document.pointerLockElement === renderer.domElement && selectedPower === "flight" && flightMode
       );
@@ -4040,6 +4085,7 @@ import { playSfx } from "./sfx.js";
     });
 
     window.addEventListener("wheel", (event) => {
+      if (gamePaused) return;
       if (heldObject) {
         event.preventDefault();
         telekinesisHoldDistance = THREE.MathUtils.clamp(

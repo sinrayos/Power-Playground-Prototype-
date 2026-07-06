@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./src/styles.css?v=20260704-wall-jump" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260706-pause-menu" />
 </head>
 <body>
   <div id="startOverlay">
@@ -94,9 +94,22 @@
     </div>
     <div id="hotbar" aria-label="Hotbar"></div>
   </section>
+  <div id="pauseOverlay" hidden>
+    <section class="pausePanel" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <p class="pauseEyebrow">Game paused</p>
+      <h2 id="pauseTitle">Take a breather, hero.</h2>
+      <p>Resume when you are ready, restart at this map's spawn, or return to the main menu to choose another Power Guy or arena.</p>
+      <div class="pauseActions">
+        <button id="resumeButton" type="button">Resume</button>
+        <button id="restartButton" type="button">Restart at Spawn</button>
+        <button id="mainMenuButton" type="button">Main Menu</button>
+      </div>
+      <small>Press Esc to resume</small>
+    </section>
+  </div>
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
-  <script type="module" src="./src/main.js?v=20260704-wall-jump"></script>
+  <script type="module" src="./src/main.js?v=20260706-pause-menu"></script>
 </body>
 </html>
