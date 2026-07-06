@@ -55,7 +55,7 @@ export const POWER_DATA = {
 export const MAP_DATA = {
   hub: {
     name: "Power Playground Hub",
-    spawn: new THREE.Vector3(0, 0.74, 12),
+    spawn: new THREE.Vector3(0, 0.54, 12),
     yaw: Math.PI,
     minY: 0.74,
     bounds: { minX: -23.6, maxX: 23.6, minZ: -23.6, maxZ: 23.6 }
@@ -69,21 +69,21 @@ export const MAP_DATA = {
   },
   minionArena: {
     name: "Minion Fighting Arena",
-    spawn: new THREE.Vector3(0, 0.74, 219),
+    spawn: new THREE.Vector3(0, 0.54, 219),
     yaw: Math.PI,
     minY: 0.74,
     bounds: { minX: -35.5, maxX: 35.5, minZ: 184.5, maxZ: 253.5 }
   },
   strengthPit: {
     name: "Strength Pit",
-    spawn: new THREE.Vector3(0, 0.74, 306),
+    spawn: new THREE.Vector3(0, 0.54, 306),
     yaw: Math.PI,
     minY: -8.1,
     bounds: { minX: -35.5, maxX: 35.5, minZ: 282.5, maxZ: 353.5 }
   },
   city: {
     name: "Power City",
-    spawn: new THREE.Vector3(0, 0.74, 460),
+    spawn: new THREE.Vector3(0, 0.54, 460),
     yaw: Math.PI,
     minY: 0.74,
     bounds: { minX: -94, maxX: 94, minZ: 366, maxZ: 554 }

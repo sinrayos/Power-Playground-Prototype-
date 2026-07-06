@@ -1,7 +1,7 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
-import { MAP_DATA, POWER_DATA } from "./config.js";
-import { playSfx } from "./sfx.js";
+import { MAP_DATA, POWER_DATA } from "./config.js?v=20260706-spawn-level";
+import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu-audio";
 
     const keys = new Set();
     const clock = new THREE.Clock();
@@ -11,6 +11,7 @@ import { playSfx } from "./sfx.js";
     const tmpVec3B = new THREE.Vector3();
     const tmpCannon = new CANNON.Vec3();
     const dummyMass = 3.4;
+    const PLAYER_VISUAL_ROOT_OFFSET = 0.27;
 
     let selectedPower = null;
     let selectedMap = "hub";
@@ -87,10 +88,18 @@ import { playSfx } from "./sfx.js";
     let webWallWalkActive = false;
     let webWallLastContactAt = 0;
     let webWallDetachUntil = 0;
+    let webWallVerticalInput = 0;
+    let webWallHorizontalInput = 0;
+    let webWallMoving = false;
+    let webWallFacingAngle = 0;
     const webSwingAnchor = new THREE.Vector3();
     const webWallNormal = new THREE.Vector3(0, 0, 1);
     const webWallPoseMatrix = new THREE.Matrix4();
     const webWallPoseQuaternion = new THREE.Quaternion();
+    const webWallFacingQuaternion = new THREE.Quaternion();
+    const webWallTargetQuaternion = new THREE.Quaternion();
+    const ATTACK_KNOCKBACK_SCALE = 0.38;
+    const ATTACK_LIFT_SCALE = 0.28;
     const TARGET_RENDER_FPS = 180;
     const MAX_RENDER_PIXEL_RATIO = 1.5;
     const FPS_SAMPLE_INTERVAL = 500;
@@ -102,6 +111,11 @@ import { playSfx } from "./sfx.js";
     let shadowRefreshAccumulator = 0;
 
     const startOverlay = document.getElementById("startOverlay");
+    const heroStep = document.getElementById("heroStep");
+    const mapStep = document.getElementById("mapStep");
+    const backToHeroes = document.getElementById("backToHeroes");
+    const launchTransition = document.getElementById("launchTransition");
+    const launchStatus = document.getElementById("launchStatus");
     const hud = document.getElementById("hud");
     const powerName = document.getElementById("powerName");
     const powerHelp = document.getElementById("powerHelp");
@@ -138,6 +152,125 @@ import { playSfx } from "./sfx.js";
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.tabIndex = 0;
     document.body.appendChild(renderer.domElement);
+
+    // A small second renderer powers lightweight, live arena dioramas in the menu.
+    const menuPreviewScene = new THREE.Scene();
+    menuPreviewScene.background = new THREE.Color(0xe8f0fa);
+    menuPreviewScene.fog = null;
+    const menuPreviewCamera = new THREE.PerspectiveCamera(52, 2, 0.1, 80);
+    const menuPreviewRenderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    menuPreviewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    menuPreviewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    menuPreviewRenderer.shadowMap.enabled = true;
+    menuPreviewRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    menuPreviewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    menuPreviewRenderer.toneMappingExposure = 1.08;
+    menuPreviewRenderer.domElement.className = "mapPreviewCanvas";
+    menuPreviewRenderer.domElement.setAttribute("aria-hidden", "true");
+    menuPreviewScene.add(new THREE.HemisphereLight(0xffffff, 0x718096, 2.1));
+    const menuPreviewSun = new THREE.DirectionalLight(0xffffff, 2.2);
+    menuPreviewSun.position.set(5, 9, 6);
+    menuPreviewSun.castShadow = true;
+    menuPreviewSun.shadow.mapSize.set(512, 512);
+    menuPreviewSun.shadow.camera.left = -7;
+    menuPreviewSun.shadow.camera.right = 7;
+    menuPreviewSun.shadow.camera.top = 7;
+    menuPreviewSun.shadow.camera.bottom = -7;
+    menuPreviewScene.add(menuPreviewSun);
+    const menuPreviewDiorama = new THREE.Group();
+    menuPreviewScene.add(menuPreviewDiorama);
+    const menuPreviewGroups = new Map();
+    let menuPreviewHost = null;
+    let menuPreviewMap = null;
+
+    const menuPreviewCenters = { hub: 0, speedTrack: 116, minionArena: 219, strengthPit: 318, city: 460 };
+    const menuPreviewCameras = {
+      hub: { radius: 20, height: 10, targetY: 2.6 },
+      speedTrack: { radius: 44, height: 17, targetY: 2.2 },
+      minionArena: { radius: 28, height: 15, targetY: 2.1 },
+      strengthPit: { radius: 28, height: 15, targetY: -1.2 },
+      city: { radius: 82, height: 48, targetY: 8 }
+    };
+
+    function buildMenuPreview(mapKey) {
+      if (menuPreviewGroups.has(mapKey)) return menuPreviewGroups.get(mapKey);
+
+      const originalSceneChildren = new Set(scene.children);
+      const originalWorldBodies = new Set(world.bodies);
+      const originalBackground = scene.background;
+      const originalFog = scene.fog;
+      const arrayLengths = {
+        raycastTargets: raycastTargets.length,
+        dynamicDummies: dynamicDummies.length,
+        movableBoxes: movableBoxes.length,
+        minionSpawnPoints: minionSpawnPoints.length,
+        syncPairs: syncPairs.length
+      };
+
+      mapBuilders[mapKey]();
+      dynamicDummies.slice(arrayLengths.dynamicDummies).forEach((dummy) => {
+        if (dummy.healthGroup) dummy.healthGroup.visible = false;
+      });
+
+      const previewGroup = new THREE.Group();
+      previewGroup.name = `${mapKey} actual map preview`;
+      scene.children.filter((child) => !originalSceneChildren.has(child)).forEach((child) => previewGroup.add(child));
+      previewGroup.position.z = -menuPreviewCenters[mapKey];
+      menuPreviewDiorama.add(previewGroup);
+      menuPreviewGroups.set(mapKey, previewGroup);
+
+      world.bodies.filter((body) => !originalWorldBodies.has(body)).forEach((body) => world.removeBody(body));
+      raycastTargets.length = arrayLengths.raycastTargets;
+      dynamicDummies.length = arrayLengths.dynamicDummies;
+      movableBoxes.length = arrayLengths.movableBoxes;
+      minionSpawnPoints.length = arrayLengths.minionSpawnPoints;
+      syncPairs.length = arrayLengths.syncPairs;
+      scene.background = originalBackground;
+      scene.fog = originalFog;
+      return previewGroup;
+    }
+
+    function showMenuPreview(mapKey, host) {
+      menuPreviewHost = host;
+      if (menuPreviewMap !== mapKey) {
+        menuPreviewMap = mapKey;
+        menuPreviewGroups.forEach((group) => { group.visible = false; });
+        buildMenuPreview(mapKey).visible = true;
+        const previewColor = mapKey === "city" ? 0x8fcdf4 : 0xe8f0fa;
+        menuPreviewScene.background.setHex(previewColor);
+      }
+      if (menuPreviewRenderer.domElement.parentElement !== host) host.appendChild(menuPreviewRenderer.domElement);
+    }
+
+    function animateMenuPreview(now) {
+      if (!menuPreviewHost || !mapStep.classList.contains("active") || startOverlay.style.display === "none") return;
+      const width = Math.round(menuPreviewHost.getBoundingClientRect().width);
+      const height = 220;
+      if (width < 2) return;
+      if (menuPreviewRenderer.domElement.width !== Math.round(width * menuPreviewRenderer.getPixelRatio())) {
+        menuPreviewRenderer.setSize(width, height, false);
+        menuPreviewCamera.aspect = width / height;
+        menuPreviewCamera.updateProjectionMatrix();
+      }
+      const orbit = now * 0.00032;
+      const view = menuPreviewCameras[menuPreviewMap];
+      menuPreviewCamera.far = menuPreviewMap === "city" ? 360 : 160;
+      menuPreviewCamera.updateProjectionMatrix();
+      menuPreviewCamera.position.set(Math.sin(orbit) * view.radius, view.height, Math.cos(orbit) * view.radius);
+      menuPreviewCamera.lookAt(0, view.targetY, 0);
+      menuPreviewRenderer.render(menuPreviewScene, menuPreviewCamera);
+    }
+
+    function disposeMenuPreviews() {
+      menuPreviewRenderer.dispose();
+      menuPreviewGroups.forEach((group) => {
+        group.traverse((part) => part.geometry?.dispose?.());
+        menuPreviewDiorama.remove(group);
+      });
+      menuPreviewGroups.clear();
+      menuPreviewRenderer.domElement.remove();
+      menuPreviewHost = null;
+    }
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(ambient);
@@ -181,14 +314,124 @@ import { playSfx } from "./sfx.js";
     let minionSpawnIndex = 0;
     let minionRespawnTimer = 0;
 
-    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0 });
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.82, metalness: 0.0 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.74, metalness: 0.0, transparent: true, opacity: 0.42 });
-    const obstacleMat = new THREE.MeshStandardMaterial({ color: 0xe6eaf0, roughness: 0.78, metalness: 0.0 });
-    const trimMat = new THREE.MeshStandardMaterial({ color: 0xc7d2e3, roughness: 0.7, metalness: 0.0 });
+    function createPatternTexture(repeatX, repeatY, paint) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 256;
+      const context = canvas.getContext("2d");
+      paint(context, 256);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(repeatX, repeatY);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+      return texture;
+    }
+
+    function addTextureSpeckles(context, count, color, seed = 7, maxRadius = 1.7) {
+      let value = seed >>> 0;
+      context.fillStyle = color;
+      for (let i = 0; i < count; i += 1) {
+        value = (value * 1664525 + 1013904223) >>> 0;
+        const x = (value / 4294967296) * 256;
+        value = (value * 1664525 + 1013904223) >>> 0;
+        const y = (value / 4294967296) * 256;
+        value = (value * 1664525 + 1013904223) >>> 0;
+        const radius = 0.35 + (value / 4294967296) * maxRadius;
+        context.beginPath();
+        context.arc(x, y, radius, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+
+    const floorTileTexture = createPatternTexture(7, 7, (context) => {
+      context.fillStyle = "#f5f7fa";
+      context.fillRect(0, 0, 256, 256);
+      context.strokeStyle = "#cbd3dd";
+      context.lineWidth = 3;
+      [0, 128, 256].forEach((point) => {
+        context.beginPath(); context.moveTo(point, 0); context.lineTo(point, 256); context.stroke();
+        context.beginPath(); context.moveTo(0, point); context.lineTo(256, point); context.stroke();
+      });
+      addTextureSpeckles(context, 90, "rgba(100,116,139,.16)", 11, 1.1);
+    });
+    const wallPanelTexture = createPatternTexture(5, 3, (context) => {
+      context.fillStyle = "#f7f9fc";
+      context.fillRect(0, 0, 256, 256);
+      context.strokeStyle = "#c3ccd8";
+      context.lineWidth = 4;
+      context.strokeRect(3, 3, 250, 250);
+      context.beginPath(); context.moveTo(128, 3); context.lineTo(128, 253); context.stroke();
+      context.fillStyle = "rgba(148,163,184,.38)";
+      [[14,14], [242,14], [14,242], [242,242]].forEach(([x, y]) => { context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fill(); });
+    });
+    const concreteTexture = createPatternTexture(4, 4, (context) => {
+      context.fillStyle = "#e0e5eb";
+      context.fillRect(0, 0, 256, 256);
+      addTextureSpeckles(context, 420, "rgba(71,85,105,.2)", 29, 1.45);
+      addTextureSpeckles(context, 180, "rgba(255,255,255,.34)", 97, 1.1);
+    });
+    const crateTexture = createPatternTexture(1, 1, (context) => {
+      context.fillStyle = "#d7e7f7";
+      context.fillRect(0, 0, 256, 256);
+      context.strokeStyle = "#647b96";
+      context.lineWidth = 15;
+      context.strokeRect(8, 8, 240, 240);
+      context.lineWidth = 10;
+      context.beginPath(); context.moveTo(18, 18); context.lineTo(238, 238); context.moveTo(238, 18); context.lineTo(18, 238); context.stroke();
+      context.strokeStyle = "rgba(255,255,255,.62)";
+      context.lineWidth = 3;
+      context.strokeRect(22, 22, 212, 212);
+    });
+    const dirtTexture = createPatternTexture(6, 6, (context) => {
+      context.fillStyle = "#9b704c";
+      context.fillRect(0, 0, 256, 256);
+      addTextureSpeckles(context, 520, "rgba(63,36,20,.28)", 43, 2.3);
+      addTextureSpeckles(context, 240, "rgba(225,184,132,.22)", 131, 1.8);
+    });
+    const asphaltTexture = createPatternTexture(12, 12, (context) => {
+      context.fillStyle = "#4b535c";
+      context.fillRect(0, 0, 256, 256);
+      addTextureSpeckles(context, 650, "rgba(226,232,240,.18)", 61, 1.25);
+      addTextureSpeckles(context, 260, "rgba(15,23,42,.28)", 17, 1.5);
+    });
+    const sidewalkTexture = createPatternTexture(6, 6, (context) => {
+      context.fillStyle = "#e1e5e9";
+      context.fillRect(0, 0, 256, 256);
+      context.strokeStyle = "#aeb7c1";
+      context.lineWidth = 4;
+      [0, 128, 256].forEach((point) => {
+        context.beginPath(); context.moveTo(point, 0); context.lineTo(point, 256); context.stroke();
+        context.beginPath(); context.moveTo(0, point); context.lineTo(256, point); context.stroke();
+      });
+      addTextureSpeckles(context, 120, "rgba(71,85,105,.15)", 73, 1.1);
+    });
+    const facadeTextures = [0, 1, 2, 3].map((variant) => createPatternTexture(1.5 + (variant % 2) * 0.5, 3, (context) => {
+      context.fillStyle = "#cbd3dc";
+      context.fillRect(0, 0, 256, 256);
+      context.fillStyle = variant % 2 ? "#31465a" : "#40566d";
+      for (let y = 22; y < 230; y += 66) {
+        for (let x = 26; x < 230; x += 88) {
+          context.fillRect(x, y, 36, 30);
+          context.fillStyle = "rgba(148,211,238,.42)";
+          context.fillRect(x + 4, y + 4, 6, 22);
+          context.fillStyle = variant % 2 ? "#31465a" : "#40566d";
+        }
+      }
+      context.strokeStyle = "rgba(71,85,105,.48)";
+      context.lineWidth = 4;
+      context.strokeRect(2, 2, 252, 252);
+    }));
+
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: floorTileTexture, roughness: 0.78, metalness: 0.0 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, map: wallPanelTexture, roughness: 0.82, metalness: 0.0 });
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: wallPanelTexture, roughness: 0.74, metalness: 0.0, transparent: true, opacity: 0.42 });
+    const obstacleMat = new THREE.MeshStandardMaterial({ color: 0xe6eaf0, map: concreteTexture, roughness: 0.78, metalness: 0.0 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0xc7d2e3, map: wallPanelTexture, roughness: 0.7, metalness: 0.0 });
     const dummyMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.6, metalness: 0.0 });
     const dummyAccentMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.52, metalness: 0.0 });
-    const movableBoxMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa, roughness: 0.62, metalness: 0.0 });
+    const movableBoxMat = new THREE.MeshStandardMaterial({ color: 0x60a5fa, map: crateTexture, roughness: 0.62, metalness: 0.0 });
 
     function addVisualFloor(name, width, depth, position, material = whiteMat) {
       const floorHalfHeight = 0.35;
@@ -325,6 +568,7 @@ import { playSfx } from "./sfx.js";
         geometry,
         new THREE.MeshStandardMaterial({
           color,
+          map: isRock ? dirtTexture : crateTexture,
           roughness: isRock ? 0.92 : 0.6,
           metalness: 0.0,
           flatShading: isRock
@@ -626,10 +870,10 @@ import { playSfx } from "./sfx.js";
 
     function buildSuperSpeedTrack() {
       const z = 116;
-      const trackFloorMat = new THREE.MeshStandardMaterial({ color: 0xfff7ed, roughness: 0.78, metalness: 0.0 });
-      const laneMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.74, metalness: 0.0 });
-      const railMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.72, metalness: 0.0 });
-      const yellowBlockMat = new THREE.MeshStandardMaterial({ color: 0xffea00, roughness: 0.68, metalness: 0.0 });
+      const trackFloorMat = new THREE.MeshStandardMaterial({ color: 0xfff7ed, map: floorTileTexture, roughness: 0.78, metalness: 0.0 });
+      const laneMat = new THREE.MeshStandardMaterial({ color: 0xf97316, map: concreteTexture, roughness: 0.74, metalness: 0.0 });
+      const railMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, map: wallPanelTexture, roughness: 0.72, metalness: 0.0 });
+      const yellowBlockMat = new THREE.MeshStandardMaterial({ color: 0xffea00, map: concreteTexture, roughness: 0.68, metalness: 0.0 });
       addVisualFloor("super speed track floor", 142, 94, new THREE.Vector3(0, 0.004, z), trackFloorMat);
 
       const outerTrack = new THREE.Mesh(new THREE.RingGeometry(17.5, 24, 96, 2), laneMat);
@@ -699,10 +943,10 @@ import { playSfx } from "./sfx.js";
 
     function buildMinionArena() {
       const z = 219;
-      const arenaFloorMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.76, metalness: 0.0 });
-      const arenaWallMat = new THREE.MeshStandardMaterial({ color: 0xf9fafb, roughness: 0.8, metalness: 0.0 });
-      const warningMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.64, metalness: 0.0 });
-      const coverMat = new THREE.MeshStandardMaterial({ color: 0xdbe4ef, roughness: 0.72, metalness: 0.05 });
+      const arenaFloorMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, map: floorTileTexture, roughness: 0.76, metalness: 0.0 });
+      const arenaWallMat = new THREE.MeshStandardMaterial({ color: 0xf9fafb, map: wallPanelTexture, roughness: 0.8, metalness: 0.0 });
+      const warningMat = new THREE.MeshStandardMaterial({ color: 0xef4444, map: concreteTexture, roughness: 0.64, metalness: 0.0 });
+      const coverMat = new THREE.MeshStandardMaterial({ color: 0xdbe4ef, map: concreteTexture, roughness: 0.72, metalness: 0.05 });
 
       addVisualFloor("minion arena floor", 74, 74, new THREE.Vector3(0, 0.006, z), arenaFloorMat);
       addStaticBox("arena north wall", new THREE.Vector3(74, 18, 0.8), new THREE.Vector3(0, 9, z - 37), arenaWallMat);
@@ -746,10 +990,10 @@ import { playSfx } from "./sfx.js";
       const z = 318;
       const pitDepth = -8.8;
       const pitRadius = 14.4;
-      const pitWallMat = new THREE.MeshStandardMaterial({ color: 0x8b5e34, roughness: 0.9, metalness: 0.0 });
-      const pitFloorMat = new THREE.MeshStandardMaterial({ color: 0x6f4426, roughness: 0.94, metalness: 0.0 });
-      const stairMat = new THREE.MeshStandardMaterial({ color: 0xa06a3f, roughness: 0.86, metalness: 0.0 });
-      const roomWallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.8, metalness: 0.0 });
+      const pitWallMat = new THREE.MeshStandardMaterial({ color: 0x8b5e34, map: dirtTexture, roughness: 0.9, metalness: 0.0 });
+      const pitFloorMat = new THREE.MeshStandardMaterial({ color: 0x6f4426, map: dirtTexture, roughness: 0.94, metalness: 0.0 });
+      const stairMat = new THREE.MeshStandardMaterial({ color: 0xa06a3f, map: dirtTexture, roughness: 0.86, metalness: 0.0 });
+      const roomWallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, map: wallPanelTexture, roughness: 0.8, metalness: 0.0 });
 
       addVisualFloor("strength pit north floor", 72, 22, new THREE.Vector3(0, 0.008, z - 25), whiteMat);
       addVisualFloor("strength pit south floor", 72, 22, new THREE.Vector3(0, 0.008, z + 25), whiteMat);
@@ -851,15 +1095,24 @@ import { playSfx } from "./sfx.js";
       const z = 460;
       const citySize = 196;
       const skyColor = 0x8fcdf4;
-      const groundMat = new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.92, metalness: 0.0 });
-      const roadMat = new THREE.MeshStandardMaterial({ color: 0x303841, roughness: 0.96, metalness: 0.0 });
-      const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.9, metalness: 0.0 });
-      const buildingMats = [
-        new THREE.MeshStandardMaterial({ color: 0x6b7c93, roughness: 0.7, metalness: 0.08, emissive: 0x172033, emissiveIntensity: 0.08 }),
-        new THREE.MeshStandardMaterial({ color: 0x9b6b63, roughness: 0.76, metalness: 0.02, emissive: 0x2b1512, emissiveIntensity: 0.06 }),
-        new THREE.MeshStandardMaterial({ color: 0x668b87, roughness: 0.72, metalness: 0.06, emissive: 0x102826, emissiveIntensity: 0.07 }),
-        new THREE.MeshStandardMaterial({ color: 0x887a9b, roughness: 0.7, metalness: 0.07, emissive: 0x20172b, emissiveIntensity: 0.07 })
+      const groundMat = new THREE.MeshStandardMaterial({ color: 0xb8c0c8, map: concreteTexture, roughness: 0.92, metalness: 0.0 });
+      const roadMat = new THREE.MeshStandardMaterial({ color: 0x303841, map: asphaltTexture, roughness: 0.96, metalness: 0.0 });
+      const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xd8dde2, map: sidewalkTexture, roughness: 0.9, metalness: 0.0 });
+      const buildingFacadeMats = [
+        new THREE.MeshStandardMaterial({ color: 0x6b7c93, map: facadeTextures[0], roughness: 0.7, metalness: 0.08, emissive: 0x172033, emissiveIntensity: 0.08 }),
+        new THREE.MeshStandardMaterial({ color: 0x9b6b63, map: facadeTextures[1], roughness: 0.76, metalness: 0.02, emissive: 0x2b1512, emissiveIntensity: 0.06 }),
+        new THREE.MeshStandardMaterial({ color: 0x668b87, map: facadeTextures[2], roughness: 0.72, metalness: 0.06, emissive: 0x102826, emissiveIntensity: 0.07 }),
+        new THREE.MeshStandardMaterial({ color: 0x887a9b, map: facadeTextures[3], roughness: 0.7, metalness: 0.07, emissive: 0x20172b, emissiveIntensity: 0.07 })
       ];
+      const buildingMats = buildingFacadeMats.map((facade, index) => {
+        const roof = new THREE.MeshStandardMaterial({
+          color: [0x596675, 0x755d59, 0x55716f, 0x6d6478][index],
+          map: concreteTexture,
+          roughness: 0.92,
+          metalness: 0.02
+        });
+        return [facade, facade, roof, roof, facade, facade];
+      });
 
       scene.background = new THREE.Color(skyColor);
       scene.fog = new THREE.Fog(skyColor, 105, 255);
@@ -996,7 +1249,7 @@ import { playSfx } from "./sfx.js";
       allowSleep: false
     });
     playerBody.addShape(new CANNON.Sphere(0.52));
-    playerBody.position.set(0, 0.74, 12);
+    playerBody.position.set(0, 0.54, 12);
     playerBody.updateMassProperties();
     playerBody.addEventListener("collide", (event) => {
       if (selectedPower !== "jump") return;
@@ -1513,6 +1766,7 @@ import { playSfx } from "./sfx.js";
     function updateSpiderWallWalk(delta, speed) {
       if (selectedPower !== "webs" || webSwingActive || webZipState || webPullState) {
         webWallWalkActive = false;
+        webWallMoving = false;
         return false;
       }
 
@@ -1521,11 +1775,15 @@ import { playSfx } from "./sfx.js";
       const horizontalInput = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0)
         - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
       const hasMovementInput = verticalInput !== 0 || horizontalInput !== 0;
+      webWallVerticalInput = verticalInput;
+      webWallHorizontalInput = horizontalInput;
+      webWallMoving = hasMovementInput;
       const contact = findSpiderWall();
       const now = performance.now();
 
       if (now < webWallDetachUntil) {
         webWallWalkActive = false;
+        webWallMoving = false;
         return false;
       }
 
@@ -1534,6 +1792,7 @@ import { playSfx } from "./sfx.js";
         webWallLastContactAt = now;
       } else if (!webWallWalkActive || now - webWallLastContactAt > 120) {
         webWallWalkActive = false;
+        webWallMoving = false;
         return false;
       }
 
@@ -1560,6 +1819,7 @@ import { playSfx } from "./sfx.js";
       if (!webWallWalkActive) return false;
       const jumpNormal = webWallNormal.clone();
       webWallWalkActive = false;
+      webWallMoving = false;
       webWallLastContactAt = 0;
       webWallDetachUntil = performance.now() + 360;
       playerBody.position.x += jumpNormal.x * 0.12;
@@ -1718,8 +1978,8 @@ import { playSfx } from "./sfx.js";
         return;
       }
       const knockbackMultiplier = dummy.knockbackMultiplier ?? 1;
-      const clampedForce = dummy.isMinion ? 0 : Math.min(force, 18) * knockbackMultiplier;
-      const clampedLift = dummy.isMinion ? 0 : Math.min(lift, 10) * knockbackMultiplier;
+      const clampedForce = dummy.isMinion ? 0 : Math.min(force, 18) * knockbackMultiplier * ATTACK_KNOCKBACK_SCALE;
+      const clampedLift = dummy.isMinion ? 0 : Math.min(lift, 10) * knockbackMultiplier * ATTACK_LIFT_SCALE;
       const impulse = new CANNON.Vec3(dir.x * clampedForce, clampedLift, dir.z * clampedForce);
       const point = new CANNON.Vec3(
         dummy.body.position.x + contactOffset.x,
@@ -1727,6 +1987,9 @@ import { playSfx } from "./sfx.js";
         dummy.body.position.z + contactOffset.z
       );
       dummy.body.wakeUp();
+      dummy.body.velocity.x *= 0.45;
+      dummy.body.velocity.y *= 0.35;
+      dummy.body.velocity.z *= 0.45;
       dummy.body.applyImpulse(impulse, point);
     }
 
@@ -1815,7 +2078,7 @@ import { playSfx } from "./sfx.js";
       playSfx("webPunch");
       if (targetDummy) {
         const hitPoint = threeFromCannon(targetDummy.body.position).add(new THREE.Vector3(0, 0.78, 0));
-        applyImpulseToDummy(targetDummy, forward, 12, 2.8, new THREE.Vector3(0, 0.45, 0), 23);
+        applyImpulseToDummy(targetDummy, forward, 1.8, 0.35, new THREE.Vector3(0, 0.45, 0), 23);
         spawnBurst(hitPoint, POWER_DATA.webs.color, 10, 0.32);
         spawnBeam(webHandPosition(), hitPoint, 0xffffff, 0.025, 0.16);
         showMessage("Web combo punch", 650);
@@ -1959,6 +2222,10 @@ import { playSfx } from "./sfx.js";
       webWallWalkActive = false;
       webWallLastContactAt = 0;
       webWallDetachUntil = 0;
+      webWallVerticalInput = 0;
+      webWallHorizontalInput = 0;
+      webWallMoving = false;
+      webWallFacingAngle = 0;
       webLeftDownAt = 0;
       webHoldTriggered = false;
       if (webCord) webCord.group.visible = false;
@@ -2162,9 +2429,6 @@ import { playSfx } from "./sfx.js";
         const attackDir = flatOffset.lengthSq() > 0.01 ? flatOffset.normalize() : forward.clone();
         const damage = dummy.isMinion ? 14 + charge * 8 : 18 + charge * 16;
         applyImpulseToDummy(dummy, attackDir, 8 + charge * 8, 5 + charge * 6, new THREE.Vector3(0, 0.55, 0), damage);
-        if (!dummy.isDefeated) {
-          dummy.body.velocity.y = Math.max(dummy.body.velocity.y, 5 + charge * 7);
-        }
         spawnBeam(origin.clone().add(new THREE.Vector3(0, 0.5, 0)), dummyPos.clone().add(new THREE.Vector3(0, 0.75, 0)), POWER_DATA.jump.color, 0.06, 0.2);
         spawnBurst(dummyPos.clone().add(new THREE.Vector3(0, 0.78, 0)), POWER_DATA.jump.color, 10, 0.35);
         hits += 1;
@@ -2243,7 +2507,7 @@ import { playSfx } from "./sfx.js";
         const dummy = targetDummy;
         damageDummy(dummy, dummy.isMinion ? 12 : 16);
         if (!dummy.isDefeated) {
-          dummy.body.velocity.y = -12;
+          dummy.body.velocity.y = -3.8;
           dummy.body.angularVelocity.set(0, 0, 0);
         }
         const away = threeFromCannon(dummy.body.position).sub(origin).setY(0);
@@ -3234,7 +3498,8 @@ import { playSfx } from "./sfx.js";
       const robotUpThrusting = isRobotUpThrusting();
       const webWallWalking = updateSpiderWallWalk(delta, data.speed);
       const webTraversal = selectedPower === "webs" && (webSwingActive || webZipState || webWallWalking);
-      moveIntensity = THREE.MathUtils.lerp(moveIntensity, move.lengthSq() > 0.001 || robotForwardThrusting || robotUpThrusting || flightLocked || webTraversal ? 1 : 0, Math.min(1, delta * 12));
+      const webTraversalAnimating = selectedPower === "webs" && (webSwingActive || webZipState || (webWallWalking && webWallMoving));
+      moveIntensity = THREE.MathUtils.lerp(moveIntensity, move.lengthSq() > 0.001 || robotForwardThrusting || robotUpThrusting || flightLocked || webTraversalAnimating ? 1 : 0, Math.min(1, delta * 12));
       if (move.lengthSq() > 0.001) {
         move.normalize();
         playerBody.wakeUp();
@@ -3373,12 +3638,13 @@ import { playSfx } from "./sfx.js";
       const robotForwardThrusting = isRobotForwardThrusting();
       const robotUpThrusting = isRobotUpThrusting();
       const sprintAnimBoost = sprinting ? 3.2 : 1;
-      walkTime += delta * (5 + POWER_DATA[selectedPower].speed * 0.34) * Math.max(moveIntensity, 0.08) * sprintAnimBoost;
+      const animationMoveIntensity = webWallWalkActive && !webWallMoving ? 0 : moveIntensity;
+      walkTime += delta * (5 + POWER_DATA[selectedPower].speed * 0.34) * Math.max(animationMoveIntensity, 0.08) * sprintAnimBoost;
       abilityPose = Math.max(0, abilityPose - delta * 4.2);
-      const strideAmount = moveIntensity * (sprinting ? 1.65 : 1);
+      const strideAmount = animationMoveIntensity * (sprinting ? 1.65 : 1);
       const stride = Math.sin(walkTime) * strideAmount;
       const counterStride = Math.sin(walkTime + Math.PI) * strideAmount;
-      const bob = Math.abs(Math.sin(walkTime)) * (sprinting ? 0.08 : 0.045) * moveIntensity;
+      const bob = Math.abs(Math.sin(walkTime)) * (sprinting ? 0.08 : 0.045) * animationMoveIntensity;
       const color = POWER_DATA[selectedPower].color;
       const targetGroupPitch = 0;
       if (!webWallWalkActive) {
@@ -3646,8 +3912,11 @@ import { playSfx } from "./sfx.js";
         const wallRight = new THREE.Vector3().crossVectors(wallUp, wallForward).normalize();
         webWallPoseMatrix.makeBasis(wallRight, wallUp, wallForward);
         webWallPoseQuaternion.setFromRotationMatrix(webWallPoseMatrix);
-        playerGroup.quaternion.slerp(webWallPoseQuaternion, Math.min(1, delta * 18));
-        playerParts.aura.material.opacity = 0.5;
+        if (webWallMoving) webWallFacingAngle = Math.atan2(webWallHorizontalInput, webWallVerticalInput);
+        webWallFacingQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), webWallFacingAngle);
+        webWallTargetQuaternion.copy(webWallPoseQuaternion).multiply(webWallFacingQuaternion);
+        playerGroup.quaternion.slerp(webWallTargetQuaternion, Math.min(1, delta * 18));
+        playerParts.aura.material.opacity = webWallMoving ? 0.5 : 0.34;
       }
 
       if (selectedPower === "strength" && isPointerDown) {
@@ -3743,7 +4012,7 @@ import { playSfx } from "./sfx.js";
         playerGroup.position.set(playerRenderPosition.x, playerRenderPosition.y, playerRenderPosition.z);
         playerGroup.position.addScaledVector(webWallNormal, -0.34);
       } else {
-        playerGroup.position.set(playerRenderPosition.x, playerRenderPosition.y - 0.52, playerRenderPosition.z);
+        playerGroup.position.set(playerRenderPosition.x, playerRenderPosition.y - PLAYER_VISUAL_ROOT_OFFSET, playerRenderPosition.z);
       }
       syncPairs.forEach(({ mesh, body }) => {
         const renderPosition = body.interpolatedPosition || body.position;
@@ -3823,6 +4092,7 @@ import { playSfx } from "./sfx.js";
     function animate(now = performance.now()) {
       requestAnimationFrame(animate);
       const delta = Math.min(clock.getDelta(), 0.05);
+      animateMenuPreview(now);
 
       if (gamePaused) {
         renderer.render(scene, camera);
@@ -3892,6 +4162,7 @@ import { playSfx } from "./sfx.js";
         strengthHeldBox.body.updateMassProperties();
         strengthHeldBox = null;
       }
+      disposeMenuPreviews();
       ensureSelectedMapBuilt();
       renderer.shadowMap.needsUpdate = true;
       resetMinionArena();
@@ -3979,15 +4250,70 @@ import { playSfx } from "./sfx.js";
     restartButton.addEventListener("click", () => startGame(selectedPower));
     mainMenuButton.addEventListener("click", () => window.location.reload());
 
-    document.querySelectorAll(".mapButton").forEach((button) => {
+    let menuSelectedPower = null;
+    let menuLaunching = false;
+
+    function setMenuStep(step) {
+      const choosingMap = step === "map";
+      heroStep.classList.toggle("active", !choosingMap);
+      heroStep.setAttribute("aria-hidden", String(choosingMap));
+      mapStep.classList.toggle("active", choosingMap);
+      mapStep.setAttribute("aria-hidden", String(!choosingMap));
+      document.querySelector('[data-progress="hero"]').classList.toggle("active", !choosingMap);
+      document.querySelector('[data-progress="map"]').classList.toggle("active", choosingMap);
+    }
+
+    startOverlay.addEventListener("pointerdown", startMenuMusic, { once: true });
+
+    document.querySelectorAll(".powerCard").forEach((button) => {
       button.addEventListener("click", () => {
-        selectedMap = button.dataset.map;
-        document.querySelectorAll(".mapButton").forEach((item) => item.classList.toggle("active", item === button));
+        if (menuLaunching) return;
+        startMenuMusic();
+        playSfx("menuTap");
+        menuSelectedPower = button.dataset.power;
+        document.querySelectorAll(".powerCard").forEach((item) => item.classList.toggle("chosen", item === button));
+        window.setTimeout(() => {
+          setMenuStep("map");
+          const firstMapButton = document.querySelector(".mapButton");
+          showMenuPreview(firstMapButton.dataset.map, firstMapButton.querySelector(".mapPreviewHost"));
+          firstMapButton.focus();
+        }, 330);
       });
     });
 
-    document.querySelectorAll(".powerCard").forEach((button) => {
-      button.addEventListener("click", () => startGame(button.dataset.power));
+    document.querySelectorAll(".mapButton").forEach((button) => {
+      const previewHost = button.querySelector(".mapPreviewHost");
+      const revealPreview = () => showMenuPreview(button.dataset.map, previewHost);
+      button.addEventListener("pointerenter", revealPreview);
+      button.addEventListener("focus", revealPreview);
+      button.addEventListener("click", () => {
+        if (!menuSelectedPower || menuLaunching) return;
+        menuLaunching = true;
+        selectedMap = button.dataset.map;
+        button.classList.add("chosen");
+        launchStatus.textContent = `${POWER_DATA[menuSelectedPower].name} → ${MAP_DATA[selectedMap].name}`;
+        playSfx("menuTap");
+        stopMenuMusic();
+        window.setTimeout(() => playSfx("gameStart"), 90);
+        startOverlay.classList.add("leaving");
+        launchTransition.classList.add("active");
+        launchTransition.setAttribute("aria-hidden", "false");
+        window.setTimeout(() => startGame(menuSelectedPower), 470);
+        window.setTimeout(() => {
+          launchTransition.classList.remove("active");
+          launchTransition.setAttribute("aria-hidden", "true");
+          startOverlay.classList.remove("leaving");
+        }, 1250);
+      });
+    });
+
+    backToHeroes.addEventListener("click", () => {
+      if (menuLaunching) return;
+      playSfx("menuBack");
+      document.querySelectorAll(".powerCard").forEach((item) => item.classList.remove("chosen"));
+      setMenuStep("hero");
+      const selectedButton = document.querySelector(`[data-power="${menuSelectedPower}"]`);
+      selectedButton?.focus();
     });
 
     window.addEventListener("keydown", (event) => {

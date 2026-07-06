@@ -5,80 +5,84 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./src/styles.css?v=20260706-pause-menu" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260706-menu-v2" />
 </head>
 <body>
   <div id="startOverlay">
     <main class="menu">
-      <div class="titleRow">
-        <h1>Power Playground (Prototype)</h1>
-        <p class="subtitle">Pick a Power Guy, aim with the mouse cursor, and hold right click to rotate the camera.</p>
-      </div>
-      <section class="mapPicker" aria-label="Choose a map">
-        <button class="mapButton active" data-map="hub">
-          <strong>Power Playground Hub</strong>
-          <span>The classic white training arena with obstacles and dummies.</span>
-        </button>
-        <button class="mapButton" data-map="speedTrack">
-          <strong>Super Speed Track</strong>
-          <span>A huge white race-track arena built for long sprint lines.</span>
-        </button>
-        <button class="mapButton" data-map="minionArena">
-          <strong>Minion Fighting Arena</strong>
-          <span>A combat room filled with one-eyed robot minions.</span>
-        </button>
-        <button class="mapButton" data-map="strengthPit">
-          <strong>Strength Pit</strong>
-          <span>A white training room with a dirt-brown pit, rocks, boxes, stairs, and surrounding dummies.</span>
-        </button>
-        <button class="mapButton" data-map="city">
-          <strong>Power City</strong>
-          <span>A huge open-air city of streets, tall buildings, and pedestrian training dummies.</span>
-        </button>
-      </section>
-      <section class="cards" aria-label="Choose a Power Guy">
+      <header class="menuHeader">
+        <div>
+          <p class="menuKicker">A 3D superhero sandbox</p>
+          <h1>Power Playground</h1>
+        </div>
+        <div class="menuProgress" aria-label="Selection progress">
+          <span class="progressStep active" data-progress="hero"><b>1</b> Power Guy</span>
+          <i></i>
+          <span class="progressStep" data-progress="map"><b>2</b> Arena</span>
+        </div>
+      </header>
+
+      <section id="heroStep" class="menuStep active" aria-labelledby="heroStepTitle">
+        <div class="stepHeading">
+          <div><span>Step 01</span><h2 id="heroStepTitle">Choose your Power Guy</h2></div>
+          <p>Hover or focus a name to reveal their playstyle. Click to lock them in.</p>
+        </div>
+        <div class="cards" aria-label="Choose a Power Guy">
         <button class="powerCard" data-power="speed">
-          <strong>Super Speed Guy</strong>
-          <span>Pure movement tech built around burst speed and instant reset angles.</span>
-          <small>High movement speed. Shift super-sprints with electric trails. Left click performs a close-range kick combo.</small>
+          <span class="heroNumber">01</span><strong>Super Speed Guy</strong>
+          <span class="heroDetails">Pure movement tech built around burst speed and instant reset angles.<small>Shift super-sprints with electric trails. Left click unleashes a fast kick combo.</small></span>
         </button>
         <button class="powerCard" data-power="strength">
-          <strong>Super Strength Guy</strong>
-          <span>A heavy hitter with slow startup and room-clearing payoff.</span>
-          <small>Slower movement. Hold left click for a shockwave. Press E to lift and throw movable boxes.</small>
+          <span class="heroNumber">02</span><strong>Super Strength Guy</strong>
+          <span class="heroDetails">A heavy hitter with slow startup and room-clearing payoff.<small>Charge a point-blank shockwave or lift and throw heavy objects.</small></span>
         </button>
         <button class="powerCard" data-power="teleport">
-          <strong>Teleportation Guy</strong>
-          <span>An instant reposition specialist for tricky angles and behind-target strikes.</span>
-          <small>Left click blinks to an enemy for a reset punch. Press E to teleport, or backstab if aimed at an enemy.</small>
+          <span class="heroNumber">03</span><strong>Teleportation Guy</strong>
+          <span class="heroDetails">An instant reposition specialist for impossible angles.<small>Blink across the arena, reset punches, and appear behind enemies.</small></span>
         </button>
         <button class="powerCard" data-power="telekinesis">
-          <strong>Telekinesis Guy</strong>
-          <span>Lifts, pulls, and throws training targets with clean mental force.</span>
-          <small>Hold left click on a dummy or box. Move the mouse to carry it, scroll distance, release to throw.</small>
+          <span class="heroNumber">04</span><strong>Telekinesis Guy</strong>
+          <span class="heroDetails">Turns the whole arena into a weapon with mental force.<small>Lift dummies and objects, control their distance, then send them flying.</small></span>
         </button>
         <button class="powerCard" data-power="flight">
-          <strong>Flight Guy</strong>
-          <span>Air mobility, aerial dodges, and dive-burst impact control.</span>
-          <small>Shift enters locked flight. Left click fires cape feathers when grounded, or dive-slams while flying.</small>
+          <span class="heroNumber">05</span><strong>Flight Guy</strong>
+          <span class="heroDetails">Owns the sky with precise aerial mobility.<small>Lock into flight, fire cape feathers, or dive-slam from above.</small></span>
         </button>
         <button class="powerCard" data-power="robot">
-          <strong>Robot Suit Guy</strong>
-          <span>Tech fighter with armor plating, shield utilities, and precision beam tools.</span>
-          <small>Left click fires energy shots. Hold Shift for forward thrusters, Space for up dash, E for a 5s blocking shield.</small>
+          <span class="heroNumber">06</span><strong>Robot Suit Guy</strong>
+          <span class="heroDetails">Armored tech with precision firepower and defense.<small>Fire palm beams, engage thrusters, up-dash, and deploy a shield.</small></span>
         </button>
         <button class="powerCard" data-power="jump">
-          <strong>Super Jump Guy</strong>
-          <span>A bounce fighter who turns huge jumps into wall rebounds and aerial punches.</span>
-          <small>Blue shirt, higher jumps. Hold left click to Mega Leap toward the cursor. Left click in air for Bounce Punch.</small>
+          <span class="heroNumber">07</span><strong>Super Jump Guy</strong>
+          <span class="heroDetails">Turns huge jumps into wall rebounds and aerial punches.<small>Charge a mouse-aimed Mega Leap or Bounce Punch in midair.</small></span>
         </button>
         <button class="powerCard" data-power="webs">
-          <strong>Spider Webs Guy</strong>
-          <span>A momentum-focused web swinger who turns the arena into a network of traps.</span>
-          <small>Space jumps; hold it again in the air to swing, then release to launch. Walk into walls and use WASD to walk on them; Space jumps away. Tap left click to punch, or hold it to keep pulling an enemy or grappling an obstacle. E shoots or plants a web net.</small>
+          <span class="heroNumber">08</span><strong>Spider Webs Guy</strong>
+          <span class="heroDetails">A momentum fighter who makes every surface useful.<small>Swing, wall-walk, grapple obstacles, pull enemies, and lay web traps.</small></span>
         </button>
+        </div>
+      </section>
+
+      <section id="mapStep" class="menuStep" aria-labelledby="mapStepTitle" aria-hidden="true">
+        <div class="stepHeading">
+          <div><span>Step 02</span><h2 id="mapStepTitle">Choose your arena</h2></div>
+          <p>Hover or focus an arena to open a live rotating preview. Click to deploy.</p>
+        </div>
+        <div class="mapPicker" aria-label="Choose a map">
+          <button class="mapButton" data-map="hub"><span class="mapIndex">01</span><strong>Power Playground Hub</strong><span>The classic indoor training arena with obstacles, boxes, and dummies.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton" data-map="speedTrack"><span class="mapIndex">02</span><strong>Super Speed Track</strong><span>A huge oval course made for long sprint lines and movement trials.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton" data-map="minionArena"><span class="mapIndex">03</span><strong>Minion Fighting Arena</strong><span>A combat chamber with cover and an endless robot challenger.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton" data-map="strengthPit"><span class="mapIndex">04</span><strong>Strength Pit</strong><span>A rugged dirt pit surrounded by rocks, stairs, and punching bags.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton" data-map="city"><span class="mapIndex">05</span><strong>Power City</strong><span>An open skyline of roads, rooftops, pedestrians, and swing routes.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+        </div>
+        <button id="backToHeroes" type="button">← Choose a different Power Guy</button>
       </section>
     </main>
+  </div>
+
+  <div id="launchTransition" aria-hidden="true">
+    <div class="launchMark"><span></span><b>POWER UP</b></div>
+    <p id="launchStatus">Deploying hero…</p>
   </div>
 
   <aside id="hud">
@@ -110,6 +114,6 @@
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
-  <script type="module" src="./src/main.js?v=20260706-pause-menu"></script>
+  <script type="module" src="./src/main.js?v=20260706-menu-v6-web-combat"></script>
 </body>
 </html>

@@ -4,6 +4,9 @@ const teleportSfxUrls = [
   new URL("../teleport1_Cw1ot9l.mp3", import.meta.url).href
 ];
 let nextTeleportSfxIndex = 0;
+let menuMusicTimer = null;
+let menuMusicGain = null;
+let menuMusicStep = 0;
 
 function getAudioContext() {
   if (!audioContext) {
@@ -55,8 +58,79 @@ function playTeleportMp3(volume = 0.78) {
   });
 }
 
+function scheduleMenuMusicStep() {
+  if (!menuMusicGain) return;
+  const ctx = getAudioContext();
+  const melody = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23, 246.94, 293.66, 392, 293.66, 220, 261.63, 329.63, 392];
+  const roots = [130.81, 146.83, 123.47, 110];
+  const now = ctx.currentTime;
+  const note = ctx.createOscillator();
+  const noteGain = ctx.createGain();
+  note.type = "triangle";
+  note.frequency.setValueAtTime(melody[menuMusicStep], now);
+  noteGain.gain.setValueAtTime(0.0001, now);
+  noteGain.gain.exponentialRampToValueAtTime(0.022, now + 0.025);
+  noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.27);
+  note.connect(noteGain).connect(menuMusicGain);
+  note.start(now);
+  note.stop(now + 0.3);
+
+  if (menuMusicStep % 4 === 0) {
+    const bass = ctx.createOscillator();
+    const bassGain = ctx.createGain();
+    bass.type = "sine";
+    bass.frequency.setValueAtTime(roots[Math.floor(menuMusicStep / 4)], now);
+    bassGain.gain.setValueAtTime(0.0001, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.016, now + 0.04);
+    bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.05);
+    bass.connect(bassGain).connect(menuMusicGain);
+    bass.start(now);
+    bass.stop(now + 1.1);
+  }
+  menuMusicStep = (menuMusicStep + 1) % melody.length;
+}
+
+export function startMenuMusic() {
+  try {
+    if (menuMusicTimer) return;
+    const ctx = getAudioContext();
+    menuMusicGain = ctx.createGain();
+    menuMusicGain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    menuMusicGain.gain.exponentialRampToValueAtTime(0.72, ctx.currentTime + 0.45);
+    menuMusicGain.connect(ctx.destination);
+    menuMusicStep = 0;
+    scheduleMenuMusicStep();
+    menuMusicTimer = window.setInterval(scheduleMenuMusicStep, 310);
+  } catch (error) {
+    // Audio is optional and may be blocked before the first interaction.
+  }
+}
+
+export function stopMenuMusic() {
+  if (menuMusicTimer) window.clearInterval(menuMusicTimer);
+  menuMusicTimer = null;
+  if (!menuMusicGain || !audioContext) return;
+  const fadingGain = menuMusicGain;
+  menuMusicGain = null;
+  fadingGain.gain.cancelScheduledValues(audioContext.currentTime);
+  fadingGain.gain.setValueAtTime(Math.max(0.0001, fadingGain.gain.value), audioContext.currentTime);
+  fadingGain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.35);
+  window.setTimeout(() => fadingGain.disconnect(), 450);
+}
+
 export function playSfx(name) {
   try {
+    if (name === "menuTap") {
+      playTone(620, 0.07, "sine", 0.022, 820);
+      playTone(1040, 0.055, "triangle", 0.012, 1220);
+    }
+    if (name === "menuBack") playTone(520, 0.09, "triangle", 0.018, 310);
+    if (name === "gameStart") {
+      playTone(220, 0.34, "triangle", 0.04, 440);
+      playTone(440, 0.3, "sine", 0.035, 880);
+      playTone(660, 0.26, "triangle", 0.026, 1320);
+      playNoise(0.2, 0.018, 1300);
+    }
     if (name === "speedSprint") playTone(520, 0.13, "sawtooth", 0.028, 1100);
     if (name === "speedKick") {
       playTone(880, 0.08, "square", 0.04, 360);
