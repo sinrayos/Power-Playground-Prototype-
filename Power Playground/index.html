@@ -1,0 +1,102 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Power Playground (Prototype)</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./src/styles.css?v=20260704-wall-jump" />
+</head>
+<body>
+  <div id="startOverlay">
+    <main class="menu">
+      <div class="titleRow">
+        <h1>Power Playground (Prototype)</h1>
+        <p class="subtitle">Pick a Power Guy, aim with the mouse cursor, and hold right click to rotate the camera.</p>
+      </div>
+      <section class="mapPicker" aria-label="Choose a map">
+        <button class="mapButton active" data-map="hub">
+          <strong>Power Playground Hub</strong>
+          <span>The classic white training arena with obstacles and dummies.</span>
+        </button>
+        <button class="mapButton" data-map="speedTrack">
+          <strong>Super Speed Track</strong>
+          <span>A huge white race-track arena built for long sprint lines.</span>
+        </button>
+        <button class="mapButton" data-map="minionArena">
+          <strong>Minion Fighting Arena</strong>
+          <span>A combat room filled with one-eyed robot minions.</span>
+        </button>
+        <button class="mapButton" data-map="strengthPit">
+          <strong>Strength Pit</strong>
+          <span>A white training room with a dirt-brown pit, rocks, boxes, stairs, and surrounding dummies.</span>
+        </button>
+        <button class="mapButton" data-map="city">
+          <strong>Power City</strong>
+          <span>A huge open-air city of streets, tall buildings, and pedestrian training dummies.</span>
+        </button>
+      </section>
+      <section class="cards" aria-label="Choose a Power Guy">
+        <button class="powerCard" data-power="speed">
+          <strong>Super Speed Guy</strong>
+          <span>Pure movement tech built around burst speed and instant reset angles.</span>
+          <small>High movement speed. Shift super-sprints with electric trails. Left click performs a close-range kick combo.</small>
+        </button>
+        <button class="powerCard" data-power="strength">
+          <strong>Super Strength Guy</strong>
+          <span>A heavy hitter with slow startup and room-clearing payoff.</span>
+          <small>Slower movement. Hold left click for a shockwave. Press E to lift and throw movable boxes.</small>
+        </button>
+        <button class="powerCard" data-power="teleport">
+          <strong>Teleportation Guy</strong>
+          <span>An instant reposition specialist for tricky angles and behind-target strikes.</span>
+          <small>Left click blinks to an enemy for a reset punch. Press E to teleport, or backstab if aimed at an enemy.</small>
+        </button>
+        <button class="powerCard" data-power="telekinesis">
+          <strong>Telekinesis Guy</strong>
+          <span>Lifts, pulls, and throws training targets with clean mental force.</span>
+          <small>Hold left click on a dummy or box. Move the mouse to carry it, scroll distance, release to throw.</small>
+        </button>
+        <button class="powerCard" data-power="flight">
+          <strong>Flight Guy</strong>
+          <span>Air mobility, aerial dodges, and dive-burst impact control.</span>
+          <small>Shift enters locked flight. Left click fires cape feathers when grounded, or dive-slams while flying.</small>
+        </button>
+        <button class="powerCard" data-power="robot">
+          <strong>Robot Suit Guy</strong>
+          <span>Tech fighter with armor plating, shield utilities, and precision beam tools.</span>
+          <small>Left click fires energy shots. Hold Shift for forward thrusters, Space for up dash, E for a 5s blocking shield.</small>
+        </button>
+        <button class="powerCard" data-power="jump">
+          <strong>Super Jump Guy</strong>
+          <span>A bounce fighter who turns huge jumps into wall rebounds and aerial punches.</span>
+          <small>Blue shirt, higher jumps. Hold left click to Mega Leap toward the cursor. Left click in air for Bounce Punch.</small>
+        </button>
+        <button class="powerCard" data-power="webs">
+          <strong>Spider Webs Guy</strong>
+          <span>A momentum-focused web swinger who turns the arena into a network of traps.</span>
+          <small>Space jumps; hold it again in the air to swing, then release to launch. Walk into walls and use WASD to walk on them; Space jumps away. Tap left click to punch, or hold it to keep pulling an enemy or grappling an obstacle. E shoots or plants a web net.</small>
+        </button>
+      </section>
+    </main>
+  </div>
+
+  <aside id="hud">
+    <h2 id="powerName">Power Guy</h2>
+    <p id="powerHelp">WASD move. Mouse aims. Right drag camera. V toggles first person.</p>
+    <div class="meter" aria-hidden="true"><div id="chargeFill"></div></div>
+    <div id="flightBadge" hidden>Flight Mode</div>
+  </aside>
+  <section id="inventoryHud" aria-label="Inventory">
+    <div class="bottomHealth">
+      <div class="bottomHealthLabel"><span>Health</span><strong id="bottomHealthText">100%</strong></div>
+      <div class="bottomHealthBar" aria-hidden="true"><div id="bottomHealthFill"></div></div>
+    </div>
+    <div id="hotbar" aria-label="Hotbar"></div>
+  </section>
+  <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
+  <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
+  <div id="message"></div>
+  <script type="module" src="./src/main.js?v=20260704-wall-jump"></script>
+</body>
+</html>
