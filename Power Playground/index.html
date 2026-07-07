@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./src/styles.css?v=20260706-menu-v2" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260707-web-red-blue" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -26,27 +26,44 @@
           <p class="menuKicker">A 3D superhero sandbox</p>
           <h1>Power Playground</h1>
         </div>
-        <div class="menuProgress" aria-label="Selection progress">
+        <div id="selectionProgress" class="menuProgress" aria-label="Selection progress" hidden>
           <span class="progressStep active" data-progress="hero"><b>1</b> Power Guy</span>
           <i></i>
           <span class="progressStep" data-progress="map"><b>2</b> Arena</span>
         </div>
         <div class="playMode" aria-label="Play mode">
           <div class="menuIdentity"><span>Playing as</span><strong id="menuUsername">Player</strong></div>
-          <div class="modeButtons">
-            <button id="soloModeButton" class="active" type="button">Solo</button>
-            <button id="onlineModeButton" type="button">Online</button>
-          </div>
-          <div id="roomControls" hidden>
-            <label for="roomCodeInput">Room code</label>
-            <input id="roomCodeInput" type="text" maxlength="8" inputmode="text" autocomplete="off" placeholder="NEW ROOM" aria-describedby="roomHint" />
-            <button id="newRoomButton" type="button">New code</button>
-            <small id="roomHint">Share the same code and choose the same arena.</small>
-          </div>
         </div>
       </header>
 
-      <section id="heroStep" class="menuStep active" aria-labelledby="heroStepTitle">
+      <section id="modeStep" class="menuStep active" aria-labelledby="modeStepTitle">
+        <div class="stepHeading modeHeading">
+          <div><span>Start</span><h2 id="modeStepTitle">How do you want to play?</h2></div>
+          <p>Play alone instantly, or join your friends in a shared online room.</p>
+        </div>
+        <div class="modeChoiceCards">
+          <button id="soloModeButton" class="modeChoice" type="button"><b>Solo</b><span>Choose any Power Guy and standard arena.</span></button>
+          <button id="onlineModeButton" class="modeChoice" type="button"><b>Online</b><span>Join a room, see your friends, and enter PvP.</span></button>
+        </div>
+        <div id="onlineLobby" hidden>
+          <div id="roomControls">
+            <label for="roomCodeInput">Room code</label>
+            <input id="roomCodeInput" type="text" maxlength="8" inputmode="text" autocomplete="off" placeholder="NEW ROOM" aria-describedby="roomHint" />
+            <button id="newRoomButton" type="button">New code</button>
+            <button id="connectRoomButton" type="button">Connect</button>
+            <small id="roomHint">Enter the same code as your friends.</small>
+          </div>
+          <div class="lobbyConnection"><span id="lobbyConnectionDot"></span><strong id="lobbyConnectionText">Not connected</strong></div>
+          <section class="lobbyRosterPanel" aria-labelledby="lobbyRosterTitle">
+            <div><span>Room leaderboard</span><strong id="lobbyPlayerCount">0 connected</strong></div>
+            <div id="lobbyRoster"><p>Connect to see who is here.</p></div>
+            <p id="lobbyPlayerDetail">Click a username to see their Power Guy and map.</p>
+          </section>
+          <button id="continueOnlineButton" type="button" disabled>Connect to continue</button>
+        </div>
+      </section>
+
+      <section id="heroStep" class="menuStep" aria-labelledby="heroStepTitle" aria-hidden="true">
         <div class="stepHeading">
           <div><span>Step 01</span><h2 id="heroStepTitle">Choose your Power Guy</h2></div>
           <p>Hover or focus a name to reveal their playstyle. Click to lock them in.</p>
@@ -85,6 +102,7 @@
           <span class="heroDetails">A momentum fighter who makes every surface useful.<small>Swing, wall-walk, grapple obstacles, pull enemies, and lay web traps.</small></span>
         </button>
         </div>
+        <button id="backToMode" type="button">← Back to Solo / Online</button>
       </section>
 
       <section id="mapStep" class="menuStep" aria-labelledby="mapStepTitle" aria-hidden="true">
@@ -156,6 +174,6 @@
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
   <div id="multiplayerStatus" hidden><span></span><strong>Online</strong><b id="activeRoomCode"></b></div>
-  <script type="module" src="./src/main.js?v=20260706-multiplayer-v3"></script>
+  <script type="module" src="./src/main.js?v=20260707-web-player-control"></script>
 </body>
 </html>

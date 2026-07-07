@@ -205,7 +205,7 @@
     .powerCard[data-power="flight"] { --hero-main: #f59e0b; --hero-alt: #dc2626; }
     .powerCard[data-power="robot"] { --hero-main: #06b6d4; --hero-alt: #334155; }
     .powerCard[data-power="jump"] { --hero-main: #2563eb; --hero-alt: #38bdf8; }
-    .powerCard[data-power="webs"] { --hero-main: #fff; --hero-alt: #dc2626; }
+    .powerCard[data-power="webs"] { --hero-main: #dc2626; --hero-alt: #2563eb; }
     .powerCard[data-power="webs"] .heroNumber { color: #dc2626; }
 
     .powerCard:hover,
@@ -330,7 +330,7 @@
 
     .mapPreviewCanvas { width: 100%; height: 220px; border-radius: 7px; }
 
-    #backToHeroes {
+    #backToHeroes, #backToMode {
       padding: 9px 0;
       border: 0;
       background: transparent;
@@ -341,8 +341,8 @@
       cursor: pointer;
     }
 
-    #backToHeroes:hover,
-    #backToHeroes:focus-visible { color: var(--accent); outline: none; }
+    #backToHeroes:hover, #backToMode:hover,
+    #backToHeroes:focus-visible, #backToMode:focus-visible { color: var(--accent); outline: none; }
 
     #launchTransition {
       position: fixed;
@@ -777,25 +777,32 @@
     .menuIdentity { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 4px 7px; border-bottom: 1px solid #e2e8f0; }
     .menuIdentity span { color: #64748b; font-size: 9px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
     .menuIdentity strong { overflow: hidden; color: #2563eb; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-    .modeButtons { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-    .modeButtons button, #newRoomButton {
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      background: #f8fafc;
-      color: #334155;
-      font: 800 11px/1.2 system-ui, sans-serif;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-    .modeButtons button { padding: 8px 12px; }
-    .modeButtons button.active { border-color: #2563eb; background: #2563eb; color: white; box-shadow: 0 5px 14px rgba(37, 99, 235, 0.2); }
-    #roomControls { display: grid; grid-template-columns: 1fr auto; gap: 5px; }
-    #roomControls[hidden] { display: none; }
+    .modeChoiceCards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 920px; margin: 10px auto 0; }
+    .modeChoice { min-height: 150px; padding: 24px; border: 2px solid #cbd5e1; border-radius: 16px; background: rgba(255,255,255,.82); color: #0f172a; text-align: left; cursor: pointer; transition: 180ms ease; }
+    .modeChoice:hover, .modeChoice:focus-visible { border-color: #2563eb; transform: translateY(-3px); box-shadow: 0 16px 40px rgba(37,99,235,.13); outline: none; }
+    .modeChoice b { display: block; margin-bottom: 9px; font-size: 30px; }
+    .modeChoice span { color: #64748b; font-size: 14px; line-height: 1.5; }
+    #onlineLobby { display: grid; grid-template-columns: minmax(280px,.85fr) minmax(340px,1.15fr); gap: 14px; max-width: 920px; margin: 18px auto 0; }
+    #onlineLobby[hidden] { display: none; }
+    #roomControls { display: grid; grid-template-columns: 1fr auto auto; align-content: start; gap: 7px; padding: 16px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.82); }
     #roomControls label { grid-column: 1 / -1; color: #64748b; font-size: 10px; font-weight: 900; letter-spacing: 0.09em; text-transform: uppercase; }
     #roomCodeInput { min-width: 0; padding: 8px 9px; border: 1px solid #94a3b8; border-radius: 8px; background: white; color: #0f172a; font: 900 13px/1 system-ui, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; }
-    #newRoomButton { padding: 7px 9px; }
+    #newRoomButton, #connectRoomButton { padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; color: #334155; font: 800 10px/1.2 system-ui,sans-serif; text-transform: uppercase; cursor: pointer; }
+    #connectRoomButton { border-color: #2563eb; background: #2563eb; color: white; }
     #roomHint { grid-column: 1 / -1; color: #64748b; font-size: 9px; }
+    .lobbyConnection { grid-column: 1; display: flex; align-items: center; gap: 8px; padding: 0 4px; color: #64748b; font-size: 11px; }
+    .lobbyConnection span { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; }
+    .lobbyConnection.connected span { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.14); }
+    .lobbyRosterPanel { grid-column: 2; grid-row: 1 / 3; padding: 16px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.86); }
+    .lobbyRosterPanel > div:first-child { display: flex; justify-content: space-between; color: #64748b; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    #lobbyRoster { display: grid; gap: 6px; max-height: 150px; margin-top: 10px; overflow: auto; }
+    #lobbyRoster button { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #0f172a; text-align: left; cursor: pointer; }
+    #lobbyRoster button span { color: #64748b; font-size: 10px; }
+    #lobbyRoster p, #lobbyPlayerDetail { margin: 6px 0 0; color: #64748b; font-size: 11px; }
+    #lobbyPlayerDetail { min-height: 18px; padding-top: 9px; border-top: 1px solid #e2e8f0; }
+    #continueOnlineButton { grid-column: 1 / -1; padding: 12px; border: 0; border-radius: 9px; background: #2563eb; color: white; font-weight: 900; cursor: pointer; }
+    #continueOnlineButton:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .mapPopulation { display: inline-flex; margin-left: auto; padding: 3px 6px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 9px; font-weight: 900; }
 
     #multiplayerStatus {
       position: fixed;
@@ -852,6 +859,9 @@
       .playMode { width: 100%; margin-top: 12px; }
       .menuProgress { min-width: 250px; }
       .stepHeading { align-items: flex-start; }
+      .modeChoiceCards, #onlineLobby { grid-template-columns: 1fr; }
+      .lobbyRosterPanel { grid-column: 1; grid-row: auto; }
+      #continueOnlineButton { grid-column: 1; }
 
       .cards {
         grid-template-columns: 1fr;

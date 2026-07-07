@@ -11,7 +11,7 @@ export const POWER_DATA = {
     name: "Super Strength Guy",
     color: 0xef4444,
     speed: 5.1,
-    help: "Hold left click to charge a point-blank shockwave. Press E to grab or throw nearby boxes."
+    help: "Hold left click to charge a point-blank shockwave. Press E to grab nearby boxes, dummies, minions, or players; press E again to throw them."
   },
   teleport: {
     name: "Teleportation Guy",
@@ -23,7 +23,7 @@ export const POWER_DATA = {
     name: "Telekinesis Guy",
     color: 0x10b981,
     speed: 7.0,
-    help: "Hold left click on a dummy or box to lift it. Release to throw it along the camera aim."
+    help: "Hold left click on a dummy, minion, box, or player to lift it. Slam it into structures or release to throw it along the camera aim."
   },
   flight: {
     name: "Flight Guy",
@@ -48,7 +48,7 @@ export const POWER_DATA = {
     name: "Spider Webs Guy",
     color: 0xdc2626,
     speed: 7.5,
-    help: "Space jumps; while airborne, hold Space to swing and release it to launch. Walk into a wall and use WASD to walk on it; Space jumps away from the wall. Tap left click to punch. Hold left click to web-pull an aimed enemy or stay grappled to an obstacle until release. E webs an enemy or lays a floor trap."
+    help: "Space jumps; while airborne, hold Space to swing and release with momentum. Tap left click to punch. Hold left click to web-pull an enemy or player, or zip to an obstacle. E nets a target or arms a floor trap."
   }
 };
 
