@@ -2,6 +2,7 @@
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
 import { MAP_DATA, POWER_DATA } from "./config.js?v=20260706-spawn-level";
 import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu-audio";
+import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v1";
 
     const keys = new Set();
     const clock = new THREE.Clock();
@@ -109,6 +110,10 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
     let fpsSampleStartedAt = performance.now();
     let displayedFps = 0;
     let shadowRefreshAccumulator = 0;
+    let onlineMode = false;
+    let multiplayerClient = null;
+    let multiplayerSendAt = 0;
+    const remotePlayers = new Map();
 
     const startOverlay = document.getElementById("startOverlay");
     const heroStep = document.getElementById("heroStep");
@@ -132,6 +137,13 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
     const fpsCounter = document.getElementById("fpsCounter");
     const shiftLockReticle = document.getElementById("shiftLockReticle");
     const message = document.getElementById("message");
+    const soloModeButton = document.getElementById("soloModeButton");
+    const onlineModeButton = document.getElementById("onlineModeButton");
+    const roomControls = document.getElementById("roomControls");
+    const roomCodeInput = document.getElementById("roomCodeInput");
+    const newRoomButton = document.getElementById("newRoomButton");
+    const multiplayerStatus = document.getElementById("multiplayerStatus");
+    const activeRoomCode = document.getElementById("activeRoomCode");
 
     // Three.js scene setup.
     const scene = new THREE.Scene();
@@ -1433,6 +1445,122 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
     playerAura.position.y = 0.12;
     playerParts.aura = playerAura;
     scene.add(playerGroup);
+
+    function createRemotePlayer(id, power = "speed") {
+      const color = power === "webs" ? 0xdc2626 : (POWER_DATA[power]?.color || 0x2563eb);
+      const group = new THREE.Group();
+      const main = new THREE.MeshStandardMaterial({ color, roughness: 0.45 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.52 });
+      const skin = new THREE.MeshStandardMaterial({ color: power === "robot" ? 0x334155 : 0xf8fafc, roughness: 0.45 });
+      const torso = makePart(new THREE.CapsuleGeometry(0.34, 0.62, 8, 14), main, group, new THREE.Vector3(0, 0.92, 0));
+      makePart(new THREE.SphereGeometry(0.29, 16, 12), skin, group, new THREE.Vector3(0, 1.58, 0));
+      const limbs = [];
+      [[-0.47, 1.2, main], [0.47, 1.2, main], [-0.2, 0.55, dark], [0.2, 0.55, dark]].forEach(([x, y, material], index) => {
+        const pivot = new THREE.Group();
+        pivot.position.set(x, y, 0);
+        const limbMaterial = power === "webs" && index < 2 ? skin : material;
+        makePart(new THREE.CapsuleGeometry(index < 2 ? 0.105 : 0.12, index < 2 ? 0.58 : 0.62, 7, 10), limbMaterial, pivot, new THREE.Vector3(0, -0.26, 0));
+        group.add(pivot);
+        limbs.push(pivot);
+      });
+      const marker = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.025, 8, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5 }));
+      marker.rotation.x = Math.PI / 2;
+      marker.position.y = 0.1;
+      group.add(marker);
+      group.userData.remoteId = id;
+      scene.add(group);
+      const remote = { id, power, group, torso, limbs, target: new THREE.Vector3(), targetYaw: 0, move: 0, walk: 0 };
+      remotePlayers.set(id, remote);
+      return remote;
+    }
+
+    function removeRemotePlayer(id) {
+      const remote = remotePlayers.get(id);
+      if (!remote) return;
+      scene.remove(remote.group);
+      remote.group.traverse((child) => {
+        child.geometry?.dispose();
+        if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose());
+        else child.material?.dispose();
+      });
+      remotePlayers.delete(id);
+    }
+
+    function ensureRemotePlayer(player) {
+      if (!player?.id || player.id === multiplayerClient?.id || player.map !== selectedMap) return null;
+      const existing = remotePlayers.get(player.id);
+      if (existing?.power === player.power) return existing;
+      if (existing) removeRemotePlayer(player.id);
+      const remote = createRemotePlayer(player.id, player.power);
+      if (player.state) applyRemoteState(player.id, player.state, true);
+      return remote;
+    }
+
+    function applyRemoteState(id, state, snap = false) {
+      if (!state?.position) return;
+      const remote = remotePlayers.get(id);
+      if (!remote) return;
+      remote.target.fromArray(state.position);
+      remote.targetYaw = Number(state.yaw) || 0;
+      remote.move = THREE.MathUtils.clamp(Number(state.move) || 0, 0, 1);
+      if (snap) remote.group.position.copy(remote.target);
+    }
+
+    function handleMultiplayerMessage(event) {
+      const packet = event.detail;
+      if (packet.type === "welcome") packet.players.forEach(ensureRemotePlayer);
+      if (packet.type === "player-joined" || packet.type === "player-updated") ensureRemotePlayer(packet.player);
+      if (packet.type === "player-state") applyRemoteState(packet.id, packet.state);
+      if (packet.type === "player-left") removeRemotePlayer(packet.id);
+    }
+
+    async function connectToMultiplayer() {
+      if (!onlineMode || !gameStarted) return;
+      const roomCode = normalizeRoomCode(roomCodeInput.value) || createRoomCode();
+      roomCodeInput.value = roomCode;
+      if (multiplayerClient?.roomCode === roomCode && multiplayerClient.socket?.readyState === WebSocket.OPEN) return;
+      remotePlayers.forEach((remote) => removeRemotePlayer(remote.id));
+      multiplayerClient?.disconnect();
+      multiplayerClient = new MultiplayerClient();
+      multiplayerClient.addEventListener("message", handleMultiplayerMessage);
+      multiplayerClient.addEventListener("status", (event) => {
+        if (!event.detail.connected) {
+          multiplayerStatus.hidden = true;
+          if (gameStarted && event.detail.reason !== "Leaving room") showMessage("Multiplayer disconnected. Solo play is still active.", 2600);
+        }
+      });
+      try {
+        await multiplayerClient.connect(roomCode, { power: selectedPower, map: selectedMap });
+        multiplayerStatus.hidden = false;
+        activeRoomCode.textContent = roomCode;
+        showMessage(`Online room ${roomCode}. Share this code with friends.`, 3400);
+      } catch (error) {
+        multiplayerStatus.hidden = true;
+        showMessage(`${error.message} Continuing in solo mode.`, 3200);
+      }
+    }
+
+    function updateMultiplayer(now, delta) {
+      for (const remote of remotePlayers.values()) {
+        remote.group.position.lerp(remote.target, Math.min(1, delta * 13));
+        remote.group.rotation.y = THREE.MathUtils.lerp(remote.group.rotation.y, remote.targetYaw, Math.min(1, delta * 12));
+        remote.walk += delta * (5 + remote.move * 7);
+        const stride = Math.sin(remote.walk) * remote.move * 0.8;
+        remote.limbs[0].rotation.x = stride;
+        remote.limbs[1].rotation.x = -stride;
+        remote.limbs[2].rotation.x = -stride;
+        remote.limbs[3].rotation.x = stride;
+        remote.torso.position.y = 0.92 + Math.abs(Math.sin(remote.walk)) * remote.move * 0.04;
+      }
+      if (!multiplayerClient?.id || now < multiplayerSendAt) return;
+      multiplayerSendAt = now + 66;
+      multiplayerClient.sendState({
+        position: [playerGroup.position.x, playerGroup.position.y, playerGroup.position.z],
+        yaw: playerGroup.rotation.y,
+        move: moveIntensity,
+        health: playerHealth,
+      });
+    }
 
     function getCameraForward(flatten = false) {
       camera.getWorldDirection(tmpVec3);
@@ -4148,6 +4276,7 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
       updateCamera();
       syncVisuals();
       animatePlayer(delta);
+      updateMultiplayer(now, delta);
       refreshWebCordVisual();
       updateEffects(delta);
       updateHud();
@@ -4245,6 +4374,7 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
       showMessage("Aim with the cursor. Hold right click and drag to move the camera.", 2400);
       playerBody.wakeUp();
       renderer.domElement.focus();
+      connectToMultiplayer();
     }
 
     function releaseActiveInputs() {
@@ -4299,6 +4429,23 @@ import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu
     }
 
     startOverlay.addEventListener("pointerdown", startMenuMusic, { once: true });
+
+    function setOnlineMode(enabled) {
+      onlineMode = enabled;
+      soloModeButton.classList.toggle("active", !enabled);
+      onlineModeButton.classList.toggle("active", enabled);
+      roomControls.hidden = !enabled;
+      if (enabled && !roomCodeInput.value) roomCodeInput.value = createRoomCode();
+      playSfx("menuTap");
+    }
+
+    soloModeButton.addEventListener("click", () => setOnlineMode(false));
+    onlineModeButton.addEventListener("click", () => setOnlineMode(true));
+    newRoomButton.addEventListener("click", () => {
+      roomCodeInput.value = createRoomCode();
+      playSfx("menuTap");
+    });
+    roomCodeInput.addEventListener("input", () => { roomCodeInput.value = normalizeRoomCode(roomCodeInput.value); });
 
     document.querySelectorAll(".powerCard").forEach((button) => {
       button.addEventListener("click", () => {

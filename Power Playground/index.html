@@ -20,6 +20,18 @@
           <i></i>
           <span class="progressStep" data-progress="map"><b>2</b> Arena</span>
         </div>
+        <div class="playMode" aria-label="Play mode">
+          <div class="modeButtons">
+            <button id="soloModeButton" class="active" type="button">Solo</button>
+            <button id="onlineModeButton" type="button">Online</button>
+          </div>
+          <div id="roomControls" hidden>
+            <label for="roomCodeInput">Room code</label>
+            <input id="roomCodeInput" type="text" maxlength="8" inputmode="text" autocomplete="off" placeholder="NEW ROOM" aria-describedby="roomHint" />
+            <button id="newRoomButton" type="button">New code</button>
+            <small id="roomHint">Share the same code and choose the same arena.</small>
+          </div>
+        </div>
       </header>
 
       <section id="heroStep" class="menuStep active" aria-labelledby="heroStepTitle">
@@ -114,6 +126,7 @@
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
-  <script type="module" src="./src/main.js?v=20260706-prototype-structures"></script>
+  <div id="multiplayerStatus" hidden><span></span><strong>Online</strong><b id="activeRoomCode"></b></div>
+  <script type="module" src="./src/main.js?v=20260706-multiplayer-v1"></script>
 </body>
 </html>
