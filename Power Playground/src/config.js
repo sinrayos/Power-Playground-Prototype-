@@ -87,5 +87,13 @@ export const MAP_DATA = {
     yaw: Math.PI,
     minY: 0.74,
     bounds: { minX: -94, maxX: 94, minZ: 366, maxZ: 554 }
+  },
+  pvpArena: {
+    name: "Prototype PvP Arena",
+    spawn: new THREE.Vector3(0, 0.54, 650),
+    yaw: Math.PI,
+    minY: 0.74,
+    onlineOnly: true,
+    bounds: { minX: -38, maxX: 38, minZ: 612, maxZ: 688 }
   }
 };

@@ -1,8 +1,8 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
-import { MAP_DATA, POWER_DATA } from "./config.js?v=20260706-spawn-level";
+import { MAP_DATA, POWER_DATA } from "./config.js?v=20260706-pvp-arena";
 import { playSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260706-menu-audio";
-import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v1";
+import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v2";
 
     const keys = new Set();
     const clock = new THREE.Clock();
@@ -113,6 +113,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let onlineMode = false;
     let multiplayerClient = null;
     let multiplayerSendAt = 0;
+    let entitySendAt = 0;
+    let multiplayerHostId = null;
+    let localUsername = "Player";
+    let pvpRespawnAt = 0;
     const remotePlayers = new Map();
 
     const startOverlay = document.getElementById("startOverlay");
@@ -144,6 +148,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const newRoomButton = document.getElementById("newRoomButton");
     const multiplayerStatus = document.getElementById("multiplayerStatus");
     const activeRoomCode = document.getElementById("activeRoomCode");
+    const menuUsername = document.getElementById("menuUsername");
+    const usernameOverlay = document.getElementById("usernameOverlay");
+    const usernameInput = document.getElementById("usernameInput");
+    const saveUsernameButton = document.getElementById("saveUsernameButton");
+    const onlineOnlyMaps = document.querySelectorAll(".onlineOnlyMap");
+    const powerSwapSelect = document.getElementById("powerSwapSelect");
+    const swapPowerButton = document.getElementById("swapPowerButton");
 
     // Three.js scene setup.
     const scene = new THREE.Scene();
@@ -195,13 +206,14 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let menuPreviewHost = null;
     let menuPreviewMap = null;
 
-    const menuPreviewCenters = { hub: 0, speedTrack: 116, minionArena: 219, strengthPit: 318, city: 460 };
+    const menuPreviewCenters = { hub: 0, speedTrack: 116, minionArena: 219, strengthPit: 318, city: 460, pvpArena: 650 };
     const menuPreviewCameras = {
       hub: { radius: 20, height: 10, targetY: 2.6 },
       speedTrack: { radius: 44, height: 17, targetY: 2.2 },
       minionArena: { radius: 28, height: 15, targetY: 2.1 },
       strengthPit: { radius: 28, height: 15, targetY: -1.2 },
-      city: { radius: 82, height: 48, targetY: 8 }
+      city: { radius: 82, height: 48, targetY: 8 },
+      pvpArena: { radius: 48, height: 24, targetY: 2.5 }
     };
 
     function buildMenuPreview(mapKey) {
@@ -1271,12 +1283,54 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       ));
     }
 
+    function buildPvpArena() {
+      const centerZ = 650;
+      const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(76, 76), whiteMat);
+      floorMesh.rotation.x = -Math.PI / 2;
+      floorMesh.position.z = centerZ;
+      floorMesh.receiveShadow = true;
+      floorMesh.userData.type = "floor";
+      scene.add(floorMesh);
+      raycastTargets.push(floorMesh);
+
+      const floorBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+      floorBody.addShape(new CANNON.Box(new CANNON.Vec3(38, 0.35, 38)));
+      floorBody.position.set(0, -0.35, centerZ);
+      floorBody.userData = { type: "floor", name: "pvp arena floor" };
+      world.addBody(floorBody);
+
+      addStaticBox("pvp north wall", new THREE.Vector3(76, 8, 0.8), new THREE.Vector3(0, 4, centerZ - 38), wallMat);
+      addStaticBox("pvp south wall", new THREE.Vector3(76, 8, 0.8), new THREE.Vector3(0, 4, centerZ + 38), wallMat);
+      addStaticBox("pvp west wall", new THREE.Vector3(0.8, 8, 76), new THREE.Vector3(-38, 4, centerZ), wallMat);
+      addStaticBox("pvp east wall", new THREE.Vector3(0.8, 8, 76), new THREE.Vector3(38, 4, centerZ), wallMat);
+
+      [
+        [-18, 2, -15, 9, 4, 3], [18, 2, 15, 9, 4, 3],
+        [-18, 2, 15, 3, 4, 9], [18, 2, -15, 3, 4, 9],
+        [0, 1.25, 0, 12, 2.5, 12], [0, 3.7, 0, 6, 2.4, 6],
+      ].forEach(([x, y, z, sx, sy, sz], index) => {
+        addStaticBox(`pvp test cover ${index + 1}`, new THREE.Vector3(sx, sy, sz), new THREE.Vector3(x, y, centerZ + z), obstacleMat);
+      });
+
+      [[-27, -27], [27, -27], [-27, 27], [27, 27], [-11, 0], [11, 0]].forEach(([x, z], index) => {
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 0.16, 24), new THREE.MeshStandardMaterial({ color: index % 2 ? 0xef4444 : 0x2563eb, emissive: index % 2 ? 0x450a0a : 0x172554, emissiveIntensity: 0.35, roughness: 0.5 }));
+        pad.position.set(x, 0.08, centerZ + z);
+        pad.receiveShadow = true;
+        scene.add(pad);
+      });
+
+      [[-24, -8], [24, 8], [-8, 24], [8, -24], [0, 15], [0, -15]].forEach(([x, z], index) => {
+        createMovableBox(new THREE.Vector3(x, 0.7, centerZ + z), index % 2 ? 0xef4444 : 0x2563eb);
+      });
+    }
+
     const mapBuilders = {
       hub: buildHub,
       speedTrack: buildSuperSpeedTrack,
       minionArena: buildMinionArena,
       strengthPit: buildStrengthPit,
-      city: buildPowerCity
+      city: buildPowerCity,
+      pvpArena: buildPvpArena
     };
 
     function ensureSelectedMapBuilt() {
@@ -1446,7 +1500,41 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     playerParts.aura = playerAura;
     scene.add(playerGroup);
 
-    function createRemotePlayer(id, power = "speed") {
+    function createPlayerTag(username, health = 100) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 128;
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+      sprite.position.y = 2.35;
+      sprite.scale.set(3.2, 0.8, 1);
+      const tag = { canvas, texture, sprite, username, health };
+      updatePlayerTag(tag, username, health);
+      return tag;
+    }
+
+    function updatePlayerTag(tag, username = tag.username, health = tag.health) {
+      tag.username = username || "Player";
+      tag.health = THREE.MathUtils.clamp(Number(health) || 0, 0, 100);
+      const context = tag.canvas.getContext("2d");
+      context.clearRect(0, 0, 512, 128);
+      context.fillStyle = "rgba(15,23,42,.86)";
+      context.beginPath();
+      context.roundRect(46, 10, 420, 94, 18);
+      context.fill();
+      context.fillStyle = "white";
+      context.font = "800 34px system-ui";
+      context.textAlign = "center";
+      context.fillText(tag.username, 256, 51, 380);
+      context.fillStyle = "#334155";
+      context.fillRect(76, 68, 360, 18);
+      context.fillStyle = tag.health > 55 ? "#22c55e" : tag.health > 25 ? "#facc15" : "#ef4444";
+      context.fillRect(76, 68, 360 * tag.health / 100, 18);
+      tag.texture.needsUpdate = true;
+    }
+
+    function createRemotePlayer(id, power = "speed", username = "Player", health = 100) {
       const color = power === "webs" ? 0xdc2626 : (POWER_DATA[power]?.color || 0x2563eb);
       const group = new THREE.Group();
       const main = new THREE.MeshStandardMaterial({ color, roughness: 0.45 });
@@ -1467,9 +1555,25 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       marker.rotation.x = Math.PI / 2;
       marker.position.y = 0.1;
       group.add(marker);
+      const cape = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 1.15), new THREE.MeshStandardMaterial({ color: 0xdc2626, side: THREE.DoubleSide, roughness: 0.65 }));
+      cape.position.set(0, 0.88, -0.34);
+      cape.rotation.x = 0.22;
+      cape.visible = power === "flight";
+      group.add(cape);
+      const shield = new THREE.Mesh(new THREE.SphereGeometry(0.94, 20, 14), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.2, wireframe: true, depthWrite: false }));
+      shield.position.y = 0.95;
+      shield.visible = false;
+      group.add(shield);
+      const traversalGlow = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.04, 8, 38), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 }));
+      traversalGlow.rotation.x = Math.PI / 2;
+      traversalGlow.position.y = 0.18;
+      traversalGlow.visible = false;
+      group.add(traversalGlow);
+      const tag = createPlayerTag(username, health);
+      group.add(tag.sprite);
       group.userData.remoteId = id;
       scene.add(group);
-      const remote = { id, power, group, torso, limbs, target: new THREE.Vector3(), targetYaw: 0, move: 0, walk: 0 };
+      const remote = { id, power, username, health, group, torso, limbs, cape, shield, traversalGlow, tag, target: new THREE.Vector3(), targetYaw: 0, move: 0, walk: 0, ability: 0, animation: {}, attackUntil: 0 };
       remotePlayers.set(id, remote);
       return remote;
     }
@@ -1489,9 +1593,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function ensureRemotePlayer(player) {
       if (!player?.id || player.id === multiplayerClient?.id || player.map !== selectedMap) return null;
       const existing = remotePlayers.get(player.id);
-      if (existing?.power === player.power) return existing;
+      if (existing?.power === player.power) {
+        existing.username = player.username || existing.username;
+        existing.health = Number.isFinite(player.health) ? player.health : existing.health;
+        updatePlayerTag(existing.tag, existing.username, existing.health);
+        if (player.state) applyRemoteState(player.id, player.state);
+        return existing;
+      }
       if (existing) removeRemotePlayer(player.id);
-      const remote = createRemotePlayer(player.id, player.power);
+      const remote = createRemotePlayer(player.id, player.power, player.username, player.health);
       if (player.state) applyRemoteState(player.id, player.state, true);
       return remote;
     }
@@ -1503,21 +1613,169 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       remote.target.fromArray(state.position);
       remote.targetYaw = Number(state.yaw) || 0;
       remote.move = THREE.MathUtils.clamp(Number(state.move) || 0, 0, 1);
+      remote.ability = THREE.MathUtils.clamp(Number(state.ability) || 0, 0, 1);
+      const previousAnimation = remote.animation || {};
+      remote.animation = state.animation || {};
+      if (remote.animation.sprint && !previousAnimation.sprint) playSfx("speedSprint");
+      if (remote.animation.flight && !previousAnimation.flight) playSfx("flightToggle");
+      if (remote.animation.thruster && !previousAnimation.thruster) playSfx("robotThruster");
+      if (remote.animation.shield && !previousAnimation.shield) playSfx("robotShield");
+      if (!remote.animation.shield && previousAnimation.shield) playSfx("robotShieldDown");
+      if (remote.animation.webSwing && !previousAnimation.webSwing) playSfx("webSwingShoot");
+      if (!remote.animation.webSwing && previousAnimation.webSwing) playSfx("webSwingRelease");
+      if (remote.animation.charging && !previousAnimation.charging) {
+        const chargeSfx = remote.power === "strength" ? "strengthCharge" : remote.power === "jump" ? "jumpCharge" : remote.power === "telekinesis" ? "telekinesisHold" : null;
+        if (chargeSfx) playSfx(chargeSfx);
+      }
+      remote.shield.visible = Boolean(remote.animation.shield);
+      remote.traversalGlow.visible = Boolean(remote.animation.sprint || remote.animation.flight || remote.animation.thruster || remote.animation.webSwing || remote.animation.wallWalk);
+      if (Number.isFinite(state.health) && state.health !== remote.health) {
+        remote.health = state.health;
+        updatePlayerTag(remote.tag, remote.username, remote.health);
+      }
       if (snap) remote.group.position.copy(remote.target);
     }
 
     function handleMultiplayerMessage(event) {
       const packet = event.detail;
-      if (packet.type === "welcome") packet.players.forEach(ensureRemotePlayer);
+      if (packet.type === "welcome") {
+        multiplayerHostId = packet.hostId;
+        packet.players.forEach(ensureRemotePlayer);
+        packet.entities?.filter((entry) => entry.map === selectedMap).forEach((entry) => applyEntitySnapshot(entry.snapshot));
+        if (selectedMap === "pvpArena") placeAtPvpSpawn(packet.id);
+      }
       if (packet.type === "player-joined" || packet.type === "player-updated") ensureRemotePlayer(packet.player);
       if (packet.type === "player-state") applyRemoteState(packet.id, packet.state);
       if (packet.type === "player-left") removeRemotePlayer(packet.id);
+      if (packet.type === "host-changed") multiplayerHostId = packet.hostId;
+      if (packet.type === "entities" && packet.map === selectedMap && packet.senderId !== multiplayerClient?.id) applyEntitySnapshot(packet.snapshot);
+      if (packet.type === "player-action") renderRemoteAction(packet.id, packet.action);
+      if (packet.type === "pvp-hit") applyPvpHit(packet);
+      if (packet.type === "player-respawn") applyPvpRespawn(packet);
+    }
+
+    function placeAtPvpSpawn(id) {
+      const slots = [[-28, -28], [28, 28], [-28, 28], [28, -28], [0, -30], [0, 30], [-30, 0], [30, 0]];
+      let hash = 0;
+      for (const char of String(id)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+      const [x, z] = slots[hash % slots.length];
+      playerBody.position.set(x, 0.74, 650 + z);
+      playerBody.velocity.set(0, 0, 0);
+    }
+
+    function entityBodyState(body, health = null) {
+      return {
+        p: [body.position.x, body.position.y, body.position.z],
+        q: [body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w],
+        v: [body.velocity.x, body.velocity.y, body.velocity.z],
+        h: health,
+      };
+    }
+
+    function buildEntitySnapshot() {
+      return {
+        dummies: dynamicDummies.map((dummy, index) => ({ id: index, ...entityBodyState(dummy.body, dummy.health) })),
+        objects: movableBoxes.map((box, index) => ({ id: index, ...entityBodyState(box.body) })),
+      };
+    }
+
+    function applyBodyState(body, state) {
+      if (!body || !state?.p || !state?.q) return;
+      body.position.set(...state.p);
+      body.quaternion.set(...state.q);
+      if (state.v) body.velocity.set(...state.v);
+      body.angularVelocity.set(0, 0, 0);
+      body.wakeUp();
+    }
+
+    function applyEntitySnapshot(snapshot) {
+      snapshot?.dummies?.forEach((state) => {
+        const dummy = dynamicDummies[state.id];
+        if (!dummy || dummy.isHeld) return;
+        applyBodyState(dummy.body, state);
+        if (Number.isFinite(state.h)) {
+          dummy.health = state.h;
+          updateDummyHealthBar(dummy);
+        }
+      });
+      snapshot?.objects?.forEach((state) => {
+        const box = movableBoxes[state.id];
+        if (!box || box.isHeld) return;
+        applyBodyState(box.body, state);
+      });
+    }
+
+    function renderRemoteAction(id, action) {
+      const remote = remotePlayers.get(id);
+      if (!remote || !action) return;
+      remote.attackUntil = performance.now() + 420;
+      const color = POWER_DATA[remote.power]?.color || 0xffffff;
+      const origin = remote.group.position.clone();
+      const forward = new THREE.Vector3(Math.sin(remote.targetYaw), 0, Math.cos(remote.targetYaw));
+      if (action.kind === "ability") {
+        const abilitySfx = { strength: "boxThrow", teleport: "teleport", telekinesis: "telekinesisThrow", flight: "flightToggle", robot: "robotShield", jump: "megaLeap", webs: "webTrap", speed: "pearlThrow" }[remote.power];
+        if (abilitySfx) playSfx(abilitySfx);
+        spawnBurst(origin.clone().add(new THREE.Vector3(0, 1, 0)), color, 10, 0.38);
+        return;
+      }
+      if (action.kind !== "attack") return;
+      const radial = remote.power === "strength" || remote.power === "flight" || remote.power === "jump";
+      const sfx = { speed: "speedKick", strength: "strengthRelease", teleport: "teleportPunch", telekinesis: "telekinesisThrow", flight: "diveImpact", robot: "robotShot", jump: "bouncePunch", webs: "webPunch" }[remote.power];
+      if (sfx) playSfx(sfx);
+      spawnRing(groundEffectPoint(origin), color, 0.3, radial ? 6.5 : 1.8, 0.35);
+      spawnBurst(origin.clone().add(new THREE.Vector3(0, 1, 0)), color, radial ? 14 : 8, 0.36);
+      if (remote.power === "robot" || remote.power === "webs" || remote.power === "telekinesis") {
+        spawnBeam(origin.clone().add(new THREE.Vector3(0, 1.1, 0)), origin.clone().add(new THREE.Vector3(0, 1.1, 0)).addScaledVector(forward, remote.power === "robot" ? 22 : 8), color, remote.power === "webs" ? 0.035 : 0.06, 0.24);
+      }
+      if (remote.power === "teleport") {
+        spawnRing(groundEffectPoint(origin.clone().addScaledVector(forward, 5)), color, 0.3, 1.7, 0.28);
+      }
+    }
+
+    function applyPvpHit(packet) {
+      const color = POWER_DATA[packet.power]?.color || 0xef4444;
+      if (packet.targetId === multiplayerClient?.id) {
+        playerHealth = packet.health;
+        playerDamageFlash = 0.55;
+        playerBody.velocity.x += packet.impulse[0];
+        playerBody.velocity.y += packet.impulse[1];
+        playerBody.velocity.z += packet.impulse[2];
+        spawnRing(groundEffectPoint(threeFromCannon(playerBody.position)), color, 0.35, 2.2, 0.35);
+        playSfx("playerHit");
+        if (packet.defeated) {
+          pvpRespawnAt = packet.respawnAt;
+          showMessage("Defeated — respawning…", 2400);
+        }
+      } else {
+        const remote = remotePlayers.get(packet.targetId);
+        if (remote) {
+          remote.health = packet.health;
+          updatePlayerTag(remote.tag, remote.username, remote.health);
+          spawnBurst(remote.group.position.clone().add(new THREE.Vector3(0, 1, 0)), color, 12, 0.4);
+        }
+      }
+    }
+
+    function applyPvpRespawn(packet) {
+      if (packet.id === multiplayerClient?.id) {
+        playerHealth = 100;
+        pvpRespawnAt = 0;
+        placeAtPvpSpawn(packet.id);
+        showMessage("Respawned", 900);
+      } else {
+        const remote = remotePlayers.get(packet.id);
+        if (remote) {
+          remote.health = 100;
+          updatePlayerTag(remote.tag, remote.username, 100);
+        }
+      }
     }
 
     async function connectToMultiplayer() {
       if (!onlineMode || !gameStarted) return;
       const roomCode = normalizeRoomCode(roomCodeInput.value) || createRoomCode();
       roomCodeInput.value = roomCode;
+      rememberRoomCode(roomCode);
       if (multiplayerClient?.roomCode === roomCode && multiplayerClient.socket?.readyState === WebSocket.OPEN) return;
       remotePlayers.forEach((remote) => removeRemotePlayer(remote.id));
       multiplayerClient?.disconnect();
@@ -1530,7 +1788,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
       });
       try {
-        await multiplayerClient.connect(roomCode, { power: selectedPower, map: selectedMap });
+        await multiplayerClient.connect(roomCode, { power: selectedPower, map: selectedMap, username: localUsername });
         multiplayerStatus.hidden = false;
         activeRoomCode.textContent = roomCode;
         showMessage(`Online room ${roomCode}. Share this code with friends.`, 3400);
@@ -1551,15 +1809,42 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         remote.limbs[2].rotation.x = -stride;
         remote.limbs[3].rotation.x = stride;
         remote.torso.position.y = 0.92 + Math.abs(Math.sin(remote.walk)) * remote.move * 0.04;
+        if (remote.ability > 0.15 || now < remote.attackUntil) {
+          remote.limbs[0].rotation.x = -1.1;
+          remote.limbs[1].rotation.x = -1.1;
+        }
+        remote.cape.rotation.x = remote.animation.flight || remote.animation.dive ? 0.05 + Math.sin(remote.walk * 2) * 0.08 : 0.22;
+        if (remote.animation.flight) {
+          remote.limbs[0].rotation.x = -1.35;
+          remote.limbs[1].rotation.x = -1.35;
+          remote.limbs[2].rotation.x = 0.25;
+          remote.limbs[3].rotation.x = -0.25;
+        } else if (remote.animation.webSwing) {
+          remote.limbs[0].rotation.x = -2.3;
+          remote.limbs[1].rotation.x = -2.3;
+          remote.limbs[2].rotation.x = 0.7;
+          remote.limbs[3].rotation.x = -0.7;
+        } else if (remote.animation.wallWalk) {
+          remote.group.rotation.z = THREE.MathUtils.lerp(remote.group.rotation.z, 0.35, Math.min(1, delta * 8));
+        } else {
+          remote.group.rotation.z = THREE.MathUtils.lerp(remote.group.rotation.z, 0, Math.min(1, delta * 8));
+        }
       }
       if (!multiplayerClient?.id || now < multiplayerSendAt) return;
       multiplayerSendAt = now + 66;
+      const forward = getCameraForward(true);
       multiplayerClient.sendState({
         position: [playerGroup.position.x, playerGroup.position.y, playerGroup.position.z],
+        forward: [forward.x, forward.y, forward.z],
         yaw: playerGroup.rotation.y,
         move: moveIntensity,
-        health: playerHealth,
+        ability: abilityPose,
+        animation: { sprint: isSpeedSprinting(), flight: flightMode, shield: robotShieldMode, thruster: isRobotForwardThrusting() || isRobotUpThrusting(), webSwing: webSwingActive, wallWalk: webWallWalkActive, wallMoving: webWallMoving, dive: divePending, charging: megaLeapCharging || (selectedPower === "strength" && isPointerDown) || Boolean(heldObject) },
       });
+      if (multiplayerClient.id === multiplayerHostId && now >= entitySendAt) {
+        entitySendAt = now + 100;
+        multiplayerClient.sendEntities(selectedMap, buildEntitySnapshot());
+      }
     }
 
     function getCameraForward(flatten = false) {
@@ -3580,6 +3865,20 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return false;
     }
 
+    function broadcastPrimaryAttack() {
+      if (!onlineMode || !multiplayerClient?.id) return;
+      multiplayerClient.sendAction({ kind: "attack", power: selectedPower, name: `${selectedPower}-primary`, at: Date.now() });
+      if (multiplayerClient.id !== multiplayerHostId) {
+        window.setTimeout(() => multiplayerClient?.sendEntities(selectedMap, buildEntitySnapshot()), 120);
+      }
+    }
+
+    function broadcastSecondaryAbility() {
+      if (!onlineMode || !multiplayerClient?.id) return;
+      multiplayerClient.sendAction({ kind: "ability", power: selectedPower, name: `${selectedPower}-secondary`, at: Date.now() });
+      window.setTimeout(() => multiplayerClient?.sendEntities(selectedMap, buildEntitySnapshot()), 120);
+    }
+
     function onAbilityDown() {
       if (!gameStarted || isPointerDown) return;
       isPointerDown = true;
@@ -3639,11 +3938,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         webLeftDownAt = 0;
         webHoldTriggered = false;
       }
+      broadcastPrimaryAttack();
       isPointerDown = false;
     }
 
     function updatePlayerControl(delta) {
       if (!selectedPower) return;
+      if (pvpRespawnAt) {
+        playerBody.velocity.x *= 0.82;
+        playerBody.velocity.z *= 0.82;
+        return;
+      }
 
       const data = POWER_DATA[selectedPower];
       const forward = getCameraForward(true);
@@ -4374,6 +4679,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       showMessage("Aim with the cursor. Hold right click and drag to move the camera.", 2400);
       playerBody.wakeUp();
       renderer.domElement.focus();
+      if (multiplayerClient?.socket?.readyState === WebSocket.OPEN) {
+        multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, username: localUsername });
+      }
       connectToMultiplayer();
     }
 
@@ -4405,6 +4713,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (paused) {
         if (document.pointerLockElement) document.exitPointerLock();
         resumeButton.focus();
+        powerSwapSelect.value = selectedPower;
       } else {
         clock.getDelta();
         renderer.domElement.focus();
@@ -4414,6 +4723,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     resumeButton.addEventListener("click", () => setPaused(false));
     restartButton.addEventListener("click", () => startGame(selectedPower));
     mainMenuButton.addEventListener("click", () => window.location.reload());
+    swapPowerButton.addEventListener("click", () => {
+      const nextPower = powerSwapSelect.value;
+      if (!POWER_DATA[nextPower] || nextPower === selectedPower) {
+        setPaused(false);
+        return;
+      }
+      playSfx("menuTap");
+      startGame(nextPower);
+      showMessage(`Switched to ${POWER_DATA[nextPower].name}`, 1600);
+    });
 
     let menuSelectedPower = null;
     let menuLaunching = false;
@@ -4430,12 +4749,52 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     startOverlay.addEventListener("pointerdown", startMenuMusic, { once: true });
 
+    function cleanUsername(value) {
+      return String(value || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim().slice(0, 18);
+    }
+
+    try { localUsername = cleanUsername(localStorage.getItem("powerPlaygroundUsername")); } catch { localUsername = ""; }
+    if (!localUsername) {
+      usernameOverlay.hidden = false;
+      window.setTimeout(() => usernameInput.focus(), 80);
+    } else {
+      usernameOverlay.hidden = true;
+      usernameInput.value = localUsername;
+    }
+    menuUsername.textContent = localUsername || "New player";
+    try { roomCodeInput.value = normalizeRoomCode(localStorage.getItem("powerPlaygroundRoomCode")); } catch { roomCodeInput.value = ""; }
+
+    function rememberRoomCode(code) {
+      const normalized = normalizeRoomCode(code);
+      if (!normalized) return;
+      try { localStorage.setItem("powerPlaygroundRoomCode", normalized); } catch { /* Storage can be unavailable in private browsing. */ }
+    }
+
+    function saveUsername() {
+      const username = cleanUsername(usernameInput.value);
+      if (username.length < 2) {
+        usernameInput.focus();
+        return;
+      }
+      localUsername = username;
+      try { localStorage.setItem("powerPlaygroundUsername", username); } catch { /* Private browsing may disable storage. */ }
+      usernameOverlay.hidden = true;
+      menuUsername.textContent = username;
+      playSfx("menuTap");
+    }
+
+    saveUsernameButton.addEventListener("click", saveUsername);
+    usernameInput.addEventListener("input", () => { usernameInput.value = cleanUsername(usernameInput.value); });
+    usernameInput.addEventListener("keydown", (event) => { if (event.key === "Enter") saveUsername(); });
+
     function setOnlineMode(enabled) {
       onlineMode = enabled;
       soloModeButton.classList.toggle("active", !enabled);
       onlineModeButton.classList.toggle("active", enabled);
       roomControls.hidden = !enabled;
+      onlineOnlyMaps.forEach((button) => { button.hidden = !enabled; });
       if (enabled && !roomCodeInput.value) roomCodeInput.value = createRoomCode();
+      if (enabled) rememberRoomCode(roomCodeInput.value);
       playSfx("menuTap");
     }
 
@@ -4443,9 +4802,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     onlineModeButton.addEventListener("click", () => setOnlineMode(true));
     newRoomButton.addEventListener("click", () => {
       roomCodeInput.value = createRoomCode();
+      rememberRoomCode(roomCodeInput.value);
       playSfx("menuTap");
     });
-    roomCodeInput.addEventListener("input", () => { roomCodeInput.value = normalizeRoomCode(roomCodeInput.value); });
+    roomCodeInput.addEventListener("input", () => {
+      roomCodeInput.value = normalizeRoomCode(roomCodeInput.value);
+      rememberRoomCode(roomCodeInput.value);
+    });
 
     document.querySelectorAll(".powerCard").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4534,6 +4897,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         toggleRobotShield();
         teleportMove();
         shootSpiderNet();
+        broadcastSecondaryAbility();
       }
       if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ControlLeft", "ControlRight", "KeyE", "ShiftLeft", "ShiftRight"].includes(event.code)) {
         event.preventDefault();

@@ -68,6 +68,10 @@ export class MultiplayerClient extends EventTarget {
     this.send({ type: "action", action });
   }
 
+  sendEntities(map, snapshot) {
+    this.send({ type: "entities", map, snapshot });
+  }
+
   disconnect() {
     if (this.socket) this.socket.close(1000, "Leaving room");
     this.socket = null;

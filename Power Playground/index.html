@@ -8,6 +8,17 @@
   <link rel="stylesheet" href="./src/styles.css?v=20260706-menu-v2" />
 </head>
 <body>
+  <div id="usernameOverlay" hidden>
+    <section class="usernamePanel" role="dialog" aria-modal="true" aria-labelledby="usernameTitle">
+      <p class="menuKicker">Player identity</p>
+      <h2 id="usernameTitle">Choose your username</h2>
+      <p>This name stays saved on this device and appears above your Power Guy online.</p>
+      <label for="usernameInput">Username</label>
+      <input id="usernameInput" type="text" maxlength="18" autocomplete="nickname" placeholder="PowerPlayer" />
+      <button id="saveUsernameButton" type="button">Enter Power Playground</button>
+      <small>Letters, numbers, spaces, underscores, and hyphens only.</small>
+    </section>
+  </div>
   <div id="startOverlay">
     <main class="menu">
       <header class="menuHeader">
@@ -21,6 +32,7 @@
           <span class="progressStep" data-progress="map"><b>2</b> Arena</span>
         </div>
         <div class="playMode" aria-label="Play mode">
+          <div class="menuIdentity"><span>Playing as</span><strong id="menuUsername">Player</strong></div>
           <div class="modeButtons">
             <button id="soloModeButton" class="active" type="button">Solo</button>
             <button id="onlineModeButton" type="button">Online</button>
@@ -86,6 +98,7 @@
           <button class="mapButton" data-map="minionArena"><span class="mapIndex">03</span><strong>Minion Fighting Arena</strong><span>A combat chamber with cover and an endless robot challenger.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
           <button class="mapButton" data-map="strengthPit"><span class="mapIndex">04</span><strong>Strength Pit</strong><span>A rugged dirt pit surrounded by rocks, stairs, and punching bags.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
           <button class="mapButton" data-map="city"><span class="mapIndex">05</span><strong>Power City</strong><span>An open skyline of roads, rooftops, pedestrians, and swing routes.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton onlineOnlyMap" data-map="pvpArena" hidden><span class="mapIndex">06</span><strong>Prototype PvP Arena</strong><span>An online-only combat test chamber with cover, jump pads, and multiple respawn points.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
         </div>
         <button id="backToHeroes" type="button">← Choose a different Power Guy</button>
       </section>
@@ -120,6 +133,22 @@
         <button id="restartButton" type="button">Restart at Spawn</button>
         <button id="mainMenuButton" type="button">Main Menu</button>
       </div>
+      <div class="pausePowerSwap">
+        <label for="powerSwapSelect">Change Power Guy</label>
+        <div>
+          <select id="powerSwapSelect">
+            <option value="speed">Super Speed Guy</option>
+            <option value="strength">Super Strength Guy</option>
+            <option value="teleport">Teleportation Guy</option>
+            <option value="telekinesis">Telekinesis Guy</option>
+            <option value="flight">Flight Guy</option>
+            <option value="robot">Robot Suit Guy</option>
+            <option value="jump">Super Jump Guy</option>
+            <option value="webs">Spider Webs Guy</option>
+          </select>
+          <button id="swapPowerButton" type="button">Switch Power</button>
+        </div>
+      </div>
       <small>Press Esc to resume</small>
     </section>
   </div>
@@ -127,6 +156,6 @@
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
   <div id="multiplayerStatus" hidden><span></span><strong>Online</strong><b id="activeRoomCode"></b></div>
-  <script type="module" src="./src/main.js?v=20260706-multiplayer-v1"></script>
+  <script type="module" src="./src/main.js?v=20260706-multiplayer-v3"></script>
 </body>
 </html>
