@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./src/styles.css?v=20260707-web-red-blue" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260707-faces-icons-maps-v4" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -15,6 +15,10 @@
       <p>This name stays saved on this device and appears above your Power Guy online.</p>
       <label for="usernameInput">Username</label>
       <input id="usernameInput" type="text" maxlength="18" autocomplete="nickname" placeholder="PowerPlayer" />
+      <fieldset class="iconPickerField">
+        <legend>Player icon</legend>
+        <div id="usernameIconPicker" class="iconPicker" aria-label="Choose your player icon"></div>
+      </fieldset>
       <button id="saveUsernameButton" type="button">Enter Power Playground</button>
       <small>Letters, numbers, spaces, underscores, and hyphens only.</small>
     </section>
@@ -32,7 +36,8 @@
           <span class="progressStep" data-progress="map"><b>2</b> Arena</span>
         </div>
         <div class="playMode" aria-label="Play mode">
-          <div class="menuIdentity"><span>Playing as</span><strong id="menuUsername">Player</strong></div>
+          <div class="menuIdentity"><span>Playing as</span><button id="menuIconButton" type="button" aria-label="Change player icon"></button><strong id="menuUsername">Player</strong></div>
+          <div id="menuIconPanel" class="menuIconPanel" hidden><span>Choose player icon</span><div id="menuIconPicker" class="iconPicker"></div></div>
         </div>
       </header>
 
@@ -130,7 +135,7 @@
 
   <aside id="hud">
     <h2 id="powerName">Power Guy</h2>
-    <p id="powerHelp">WASD move. Mouse aims. Right drag camera. V toggles first person.</p>
+    <p id="powerHelp">WASD move. Mouse aims. Right drag camera. V cycles camera views.</p>
     <div class="meter" aria-hidden="true"><div id="chargeFill"></div></div>
     <div id="flightBadge" hidden>Flight Mode</div>
   </aside>
@@ -167,13 +172,32 @@
           <button id="swapPowerButton" type="button">Switch Power</button>
         </div>
       </div>
+      <div class="pausePowerSwap">
+        <label for="mapSwapSelect">Change arena</label>
+        <div>
+          <select id="mapSwapSelect">
+            <option value="hub">Power Playground Hub</option>
+            <option value="speedTrack">Super Speed Track</option>
+            <option value="minionArena">Minion Fighting Arena</option>
+            <option value="strengthPit">Strength Pit</option>
+            <option value="city">Power City</option>
+            <option value="pvpArena">Prototype PvP Arena</option>
+          </select>
+          <button id="swapMapButton" type="button">Switch Map</button>
+        </div>
+      </div>
       <small>Press Esc to resume</small>
     </section>
   </div>
+  <aside id="playerList" hidden aria-label="Server player list">
+    <header><strong>Players</strong><span id="playerListCount">1</span></header>
+    <div id="playerListRows"></div>
+    <small>Tab to close</small>
+  </aside>
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
   <div id="multiplayerStatus" hidden><span></span><strong>Online</strong><b id="activeRoomCode"></b></div>
-  <script type="module" src="./src/main.js?v=20260707-web-player-control"></script>
+  <script type="module" src="./src/main.js?v=20260707-faces-icons-maps-v4"></script>
 </body>
 </html>

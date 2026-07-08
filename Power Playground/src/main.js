@@ -17,8 +17,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const ROBOT_SHOT_COOLDOWN = 850;
 
     let selectedPower = null;
+    let menuSelectedPower = null;
     let selectedMap = "hub";
     let builtMap = null;
+    const builtMaps = new Set();
     let gameStarted = false;
     let gamePaused = false;
     let cameraYaw = Math.PI;
@@ -41,6 +43,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let flightFeatherCooldownUntil = 0;
     let featherPoseUntil = 0;
     let firstPersonMode = false;
+    let frontViewMode = false;
     let rightMouseDragging = false;
     let shiftLockMode = false;
     let robotShieldMode = false;
@@ -138,6 +141,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let entitySendAt = 0;
     let multiplayerHostId = null;
     let localUsername = "Player";
+    let localPlayerIcon = "portrait-speed";
     let pvpRespawnAt = 0;
     let suppressNetworkVisuals = false;
     let burstSeedCounter = Math.floor(Math.random() * 0x7fffffff);
@@ -208,6 +212,99 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const lobbyRoster = document.getElementById("lobbyRoster");
     const lobbyPlayerCount = document.getElementById("lobbyPlayerCount");
     const lobbyPlayerDetail = document.getElementById("lobbyPlayerDetail");
+    const playerList = document.getElementById("playerList");
+    const playerListRows = document.getElementById("playerListRows");
+    const playerListCount = document.getElementById("playerListCount");
+    const usernameIconPicker = document.getElementById("usernameIconPicker");
+    const menuIconButton = document.getElementById("menuIconButton");
+    const menuIconPanel = document.getElementById("menuIconPanel");
+    const menuIconPicker = document.getElementById("menuIconPicker");
+    const mapSwapSelect = document.getElementById("mapSwapSelect");
+    const swapMapButton = document.getElementById("swapMapButton");
+
+    const PLAYER_ICON_POWERS = ["speed", "strength", "teleport", "telekinesis", "flight", "jump", "robot", "webs"];
+    const PLAYER_ICON_IDS = PLAYER_ICON_POWERS.flatMap((power) => [`portrait-${power}`, `symbol-${power}`]);
+    const PIXEL_FACE_RECTS = {
+      speed: [[5,7,8,2],[19,7,8,2],[7,11,6,6],[19,11,6,6],[5,20,22,3],[8,23,16,5,"#ffffff"],[11,23,2,3],[19,23,2,3]],
+      strength: [[6,10,7,2],[19,8,7,2],[8,13,5,2],[20,12,5,2],[9,21,14,2],[12,23,8,2]],
+      teleport: [[5,12,8,2],[19,10,8,2],[12,22,8,2]],
+      telekinesis: [[5,9,9,2],[18,9,9,2],[8,12,6,3],[18,12,6,3],[10,23,12,2]],
+      flight: [[5,7,3,2],[8,8,6,2],[18,8,6,2],[24,7,3,2],[7,11,6,4],[19,11,6,4],[7,20,18,2],[10,22,12,3,"#ffffff"]],
+      jump: [[5,7,8,2],[20,9,6,2],[7,11,6,6],[21,12,4,3],[6,21,6,3],[12,23,13,2],[20,25,5,4,"#ff69b4"]],
+      robot: [[3,8,26,11,"#263449"],[7,11,6,4,"#67e8f9"],[19,11,6,4,"#67e8f9"],[10,23,12,2,"#67e8f9"]],
+      webs: [[5,10,9,2],[18,9,9,2],[8,12,5,4],[19,12,5,4],[10,22,13,2],[19,20,5,2]]
+    };
+    const iconArtCache = new Map();
+    const iconImageCache = new Map();
+
+    function playerIconArt(iconId = "portrait-speed") {
+      const safeId = PLAYER_ICON_IDS.includes(iconId) ? iconId : "portrait-speed";
+      if (iconArtCache.has(safeId)) return iconArtCache.get(safeId);
+      const [kind, power] = safeId.split("-");
+      const color = `#${(POWER_DATA[power]?.color || 0x2563eb).toString(16).padStart(6, "0")}`;
+      const backgroundColor = kind === "portrait" && power === "webs" ? "#2563eb" : color;
+      const dark = power === "speed" ? "#6b5600" : "#172033";
+      const symbols = {
+        speed: '<path d="M39 8 18 37h15l-7 19 26-32H36z"/><path d="M10 19h15M7 29h14"/>',
+        strength: '<path d="M15 30V18q0-5 5-5t5 5v8-11q0-5 5-5t5 5v11-9q0-5 5-5t5 5v11-6q0-5 5-5t5 5v15q0 19-20 21-17-1-23-17L7 31q-2-5 3-7 4-1 7 5l4 7V30z" fill="#fff" stroke="#fff"/><path d="M21 29h28M25 19v10m10-12v12m10-8v8" stroke="#172033" stroke-width="3"/>',
+        teleport: '<path d="M51 33c0 12-10 21-22 19C16 50 9 37 14 25 19 13 34 8 45 16c10 7 9 22 0 28-8 6-20 2-22-7-2-8 5-15 13-14 7 1 10 9 6 14-3 5-11 4-12-2"/>',
+        telekinesis: '<path d="M13 24C5 31 8 44 19 48m32-24c8 7 5 20-6 24M19 14C8 17 7 31 17 35m28-21c11 3 12 17 2 21" opacity=".65"/><path d="M24 18c-8 0-11 10-5 14-5 6 1 15 8 12 3 6 12 4 12-2 8 2 12-8 6-13 4-8-7-15-13-9-2-4-8-4-8-2z"/><path d="M31 21v22m-8-17c5 0 8 3 8 7m8-7c-5 0-8 3-8 7m-7 6c4-2 7-1 7 3m8-3c-4-2-7-1-7 3" stroke-width="2.5"/>',
+        flight: '<path d="M16 10h32l8 44-24-9L8 54z"/><path d="M16 10q16 12 32 0M32 18v27"/>',
+        jump: '<path d="M18 9v9l-8 5 16 7-16 7 16 7-8 5v7M46 9v9l8 5-16 7 16 7-16 7 8 5v7"/>',
+        robot: '<circle cx="32" cy="32" r="24" fill="#05070b" stroke="#22d3ee"/><path d="M14 25h36l-6 17H20z" fill="#22d3ee" stroke="#67e8f9"/><path d="M23 32h6m6 0h6" stroke="#05070b" stroke-width="4"/>',
+        webs: '<path d="M32 7v50M7 32h50M14 14l36 36M50 14 14 50M32 7C18 7 7 18 7 32s11 25 25 25 25-11 25-25S46 7 32 7zm0 9c-9 0-16 7-16 16s7 16 16 16 16-7 16-16-7-16-16-16zm0 8a8 8 0 1 0 0 16 8 8 0 0 0 0-16z"/>'
+      };
+      const portraitPixels = PIXEL_FACE_RECTS[power].map(([x,y,width,height,fill = "#172033"]) => `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}"/>`).join("");
+      const art = kind === "symbol"
+        ? `<g fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">${symbols[power]}</g>`
+        : `<path d="M7 55q25-17 50 0v9H7z" fill="${color}"/><circle cx="32" cy="29" r="21" fill="${power === "robot" ? "#111827" : "#e5e7eb"}"/><g transform="translate(16 12)" shape-rendering="crispEdges">${portraitPixels}</g>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${backgroundColor}"/><stop offset="1" stop-color="#172033"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><circle cx="12" cy="11" r="15" fill="#fff" opacity=".13"/>${art}</svg>`;
+      const uri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      iconArtCache.set(safeId, uri);
+      return uri;
+    }
+
+    function cachedPlayerIconImage(iconId) {
+      const safeId = PLAYER_ICON_IDS.includes(iconId) ? iconId : "portrait-speed";
+      if (!iconImageCache.has(safeId)) {
+        const image = new Image();
+        image.src = playerIconArt(safeId);
+        iconImageCache.set(safeId, image);
+      }
+      return iconImageCache.get(safeId);
+    }
+
+    function setLocalPlayerIcon(iconId, sync = true) {
+      localPlayerIcon = PLAYER_ICON_IDS.includes(iconId) ? iconId : "portrait-speed";
+      try { localStorage.setItem("powerPlaygroundPlayerIcon", localPlayerIcon); } catch { /* Storage can be unavailable. */ }
+      menuIconButton.replaceChildren(Object.assign(document.createElement("img"), { src: playerIconArt(localPlayerIcon), alt: "" }));
+      document.querySelectorAll(".iconChoice").forEach((button) => button.classList.toggle("selected", button.dataset.icon === localPlayerIcon));
+      renderPlayerList();
+      if (sync && multiplayerClient?.socket?.readyState === WebSocket.OPEN) {
+        multiplayerClient.send({ type: "hello", power: gameStarted ? selectedPower : menuSelectedPower || "speed", map: gameStarted ? selectedMap : "lobby", username: localUsername, icon: localPlayerIcon });
+        rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, icon: localPlayerIcon });
+      }
+    }
+
+    function buildIconPicker(host) {
+      if (!host) return;
+      PLAYER_ICON_IDS.forEach((iconId) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "iconChoice";
+        button.dataset.icon = iconId;
+        button.title = `${POWER_DATA[iconId.split("-")[1]].name} ${iconId.startsWith("portrait") ? "portrait" : "symbol"}`;
+        button.appendChild(Object.assign(document.createElement("img"), { src: playerIconArt(iconId), alt: button.title }));
+        button.addEventListener("click", () => setLocalPlayerIcon(iconId));
+        host.appendChild(button);
+      });
+    }
+
+    buildIconPicker(usernameIconPicker);
+    buildIconPicker(menuIconPicker);
+    try { localPlayerIcon = localStorage.getItem("powerPlaygroundPlayerIcon") || localPlayerIcon; } catch { /* Storage can be unavailable. */ }
+    setLocalPlayerIcon(localPlayerIcon, false);
+    menuIconButton.addEventListener("click", () => { menuIconPanel.hidden = !menuIconPanel.hidden; });
 
     // Three.js scene setup.
     const scene = new THREE.Scene();
@@ -1400,9 +1497,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     };
 
     function ensureSelectedMapBuilt() {
-      if (builtMap === selectedMap) return;
-      if (builtMap !== null) throw new Error("Only one map can be loaded per game session.");
+      if (builtMaps.has(selectedMap)) return;
       mapBuilders[selectedMap]();
+      builtMaps.add(selectedMap);
       builtMap = selectedMap;
     }
 
@@ -1439,7 +1536,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     const playerMaterialMain = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.42, metalness: 0.0 });
     const suitDarkMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.5, metalness: 0.0 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.44, metalness: 0.0 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, roughness: 0.44, metalness: 0.0 });
     const capeMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.62, metalness: 0.0, side: THREE.DoubleSide });
     const robotArmorMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.42, metalness: 0.45 });
     const robotGlowMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.88 });
@@ -1480,6 +1577,42 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const playerChest = new THREE.Object3D();
     playerGroup.add(playerChest);
     const playerHead = makePart(new THREE.SphereGeometry(0.29, 20, 16), skinMat, playerGroup, new THREE.Vector3(0, 1.58, 0));
+    const playerFaceGroup = new THREE.Group();
+    playerFaceGroup.position.z = 0.286;
+    playerHead.add(playerFaceGroup);
+    playerParts.faceGroup = playerFaceGroup;
+
+    function createPixelFaceTexture(power) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 32;
+      const context = canvas.getContext("2d");
+      context.imageSmoothingEnabled = false;
+      const ink = power === "robot" ? "#67e8f9" : "#172033";
+      context.clearRect(0, 0, 32, 32);
+      const rect = (x, y, width, height, color = ink) => { context.fillStyle = color; context.fillRect(x, y, width, height); };
+      PIXEL_FACE_RECTS[power].forEach(([x, y, width, height, color]) => rect(x, y, width, height, color));
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      return texture;
+    }
+
+    PLAYER_ICON_POWERS.forEach((power) => {
+      const face = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.43, 0.43),
+        new THREE.MeshBasicMaterial({ map: createPixelFaceTexture(power), transparent: true, alphaTest: 0.05, depthWrite: false })
+      );
+      face.name = `pixel-face-${power}`;
+      face.visible = power === "speed";
+      playerFaceGroup.add(face);
+    });
+
+    function applyPowerFace(parts, power) {
+      parts.faceGroup?.children.forEach((face) => { face.visible = face.name === `pixel-face-${power}`; });
+    }
     const playerCape = makePart(new THREE.PlaneGeometry(0.88, 1.18, 6, 6), capeMat, playerGroup, new THREE.Vector3(0, 0.84, -0.31));
     playerGroup.remove(playerCape);
     playerTorso.add(playerCape);
@@ -1577,7 +1710,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     playerGroup.add(playerAura);
     scene.add(playerGroup);
 
-    function createPlayerTag(username, health = 100, maxHealth = 100) {
+    function createPlayerTag(username, health = 100, maxHealth = 100, icon = "portrait-speed") {
       const canvas = document.createElement("canvas");
       canvas.width = 512;
       canvas.height = 128;
@@ -1586,30 +1719,50 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
       sprite.position.y = 2.35;
       sprite.scale.set(3.2, 0.8, 1);
-      const tag = { canvas, texture, sprite, username, health, maxHealth };
-      updatePlayerTag(tag, username, health, maxHealth);
+      const tag = { canvas, texture, sprite, username, health, maxHealth, icon, drawn: false };
+      updatePlayerTag(tag, username, health, maxHealth, icon);
       return tag;
     }
 
-    function updatePlayerTag(tag, username = tag.username, health = tag.health, maxHealth = tag.maxHealth || 100) {
-      tag.username = username || "Player";
-      tag.maxHealth = Math.max(1, Number(maxHealth) || 100);
-      tag.health = THREE.MathUtils.clamp(Number(health) || 0, 0, tag.maxHealth);
+    function updatePlayerTag(tag, username = tag.username, health = tag.health, maxHealth = tag.maxHealth || 100, icon = tag.icon || "portrait-speed") {
+      const nextUsername = username || "Player";
+      const nextMaxHealth = Math.max(1, Number(maxHealth) || 100);
+      const nextHealth = THREE.MathUtils.clamp(Number(health) || 0, 0, nextMaxHealth);
+      const nextIcon = PLAYER_ICON_IDS.includes(icon) ? icon : "portrait-speed";
+      if (tag.drawn && tag.username === nextUsername && tag.maxHealth === nextMaxHealth && tag.health === nextHealth && tag.icon === nextIcon) return;
+      tag.username = nextUsername;
+      tag.maxHealth = nextMaxHealth;
+      tag.health = nextHealth;
+      tag.icon = nextIcon;
       const healthRatio = tag.health / tag.maxHealth;
       const context = tag.canvas.getContext("2d");
       context.clearRect(0, 0, 512, 128);
       context.fillStyle = "rgba(15,23,42,.86)";
       context.beginPath();
-      context.roundRect(46, 10, 420, 94, 18);
+      context.roundRect(18, 10, 476, 94, 18);
       context.fill();
+      const iconImage = cachedPlayerIconImage(tag.icon);
+      const drawIcon = () => {
+        if (tag.icon !== nextIcon || !iconImage.naturalWidth) return;
+        context.save();
+        context.beginPath();
+        context.roundRect(30, 22, 66, 66, 13);
+        context.clip();
+        context.drawImage(iconImage, 30, 22, 66, 66);
+        context.restore();
+        tag.texture.needsUpdate = true;
+      };
+      if (iconImage.complete) drawIcon();
+      else iconImage.addEventListener("load", drawIcon, { once: true });
       context.fillStyle = "white";
-      context.font = "800 34px system-ui";
+      context.font = "800 32px system-ui";
       context.textAlign = "center";
-      context.fillText(tag.username, 256, 51, 380);
+      context.fillText(tag.username, 292, 50, 370);
       context.fillStyle = "#334155";
-      context.fillRect(76, 68, 360, 18);
+      context.fillRect(116, 68, 350, 18);
       context.fillStyle = healthRatio > 0.55 ? "#22c55e" : healthRatio > 0.25 ? "#facc15" : "#ef4444";
-      context.fillRect(76, 68, 360 * healthRatio, 18);
+      context.fillRect(116, 68, 350 * healthRatio, 18);
+      tag.drawn = true;
       tag.texture.needsUpdate = true;
     }
 
@@ -1655,15 +1808,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       parts.torso.material.color.setHex(power === "webs" ? 0xdc2626 : color);
       parts.leftArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : color);
       parts.rightArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : color);
-      parts.head.material.color.setHex(power === "robot" ? 0x1f2937 : 0xf8fafc);
-      parts.leftHand.material.color.setHex(power === "robot" ? 0x334155 : 0xf8fafc);
-      parts.rightHand.material.color.setHex(power === "robot" ? 0x334155 : 0xf8fafc);
+      parts.head.material.color.setHex(power === "robot" ? 0x111827 : 0xe5e7eb);
+      parts.leftHand.material.color.setHex(power === "robot" ? 0x334155 : 0xe5e7eb);
+      parts.rightHand.material.color.setHex(power === "robot" ? 0x334155 : 0xe5e7eb);
       parts.leftFoot.material.color.setHex(power === "jump" ? 0x38bdf8 : power === "speed" ? 0xffea00 : 0x111827);
       parts.rightFoot.material.color.copy(parts.leftFoot.material.color);
       parts.aura.material.color.setHex(color);
+      applyPowerFace(parts, power);
     }
 
-    function createRemotePlayer(id, power = "speed", username = "Player", health = 100) {
+    function createRemotePlayer(id, power = "speed", username = "Player", health = 100, icon = "portrait-speed") {
       const sourceNodes = [];
       playerGroup.traverse((node) => sourceNodes.push(node));
       const group = playerGroup.clone(true);
@@ -1680,11 +1834,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       group.visible = true;
       group.userData.remoteId = id;
       styleRemoteRig(parts, power);
-      const tag = createPlayerTag(username, health, maxPlayerHealth(power));
+      const tag = createPlayerTag(username, health, maxPlayerHealth(power), icon);
       group.add(tag.sprite);
       const remoteWebCord = createWebCord();
       scene.add(group);
-      const remote = { id, power, username, health, group, parts, tag, webCord: remoteWebCord, webWrap: null, webTrappedUntil: 0, target: new THREE.Vector3(), targetQuaternion: new THREE.Quaternion(), web: null, carryKey: null };
+      const remote = { id, power, username, health, icon, group, parts, tag, webCord: remoteWebCord, webWrap: null, webTrappedUntil: 0, target: new THREE.Vector3(), targetQuaternion: new THREE.Quaternion(), web: null, carryKey: null };
       remotePlayers.set(id, remote);
       return remote;
     }
@@ -1712,15 +1866,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       }
       if (existing?.power === player.power) {
         existing.username = player.username || existing.username;
+        existing.icon = player.icon || existing.icon;
         existing.health = Number.isFinite(player.health) ? player.health : existing.health;
-        updatePlayerTag(existing.tag, existing.username, existing.health);
+        updatePlayerTag(existing.tag, existing.username, existing.health, maxPlayerHealth(existing.power), existing.icon);
         existing.shieldActive = Boolean(player.shieldActive);
         if (existing.parts.robotShield) existing.parts.robotShield.visible = existing.shieldActive;
         if (player.state) applyRemoteState(player.id, player.state);
         return existing;
       }
       if (existing) removeRemotePlayer(player.id);
-      const remote = createRemotePlayer(player.id, player.power, player.username, player.health);
+      const remote = createRemotePlayer(player.id, player.power, player.username, player.health, player.icon);
       remote.shieldActive = Boolean(player.shieldActive);
       if (remote.parts.robotShield) remote.parts.robotShield.visible = remote.shieldActive;
       if (player.state) applyRemoteState(player.id, player.state, true);
@@ -1732,7 +1887,40 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const previous = roomPlayers.get(player.id) || {};
       roomPlayers.set(player.id, { ...previous, ...player });
       renderRoomRoster();
+      renderPlayerList();
       renderMapPopulation();
+    }
+
+    function renderPlayerList() {
+      if (!playerListRows) return;
+      const entries = onlineMode ? new Map(roomPlayers) : new Map();
+      if (!onlineMode || !entries.has(multiplayerClient?.id)) {
+        entries.set(multiplayerClient?.id || "local", {
+          id: multiplayerClient?.id || "local",
+          username: localUsername,
+          icon: localPlayerIcon,
+          power: selectedPower || menuSelectedPower || "speed",
+          map: gameStarted ? selectedMap : "lobby"
+        });
+      }
+      const players = [...entries.values()].sort((a, b) => String(a.username).localeCompare(String(b.username)));
+      playerListCount.textContent = String(players.length);
+      playerListRows.replaceChildren();
+      players.forEach((player) => {
+        const row = document.createElement("div");
+        row.className = "playerListRow";
+        const icon = Object.assign(document.createElement("img"), { src: playerIconArt(player.icon), alt: "" });
+        const name = document.createElement("strong");
+        name.textContent = `${player.username || "Player"}${player.id === multiplayerClient?.id || (!onlineMode && player.id === "local") ? " (You)" : ""}`;
+        const power = document.createElement("span");
+        power.textContent = POWER_DATA[player.power]?.name || "Choosing";
+        power.title = power.textContent;
+        const map = document.createElement("span");
+        map.textContent = player.map === "lobby" ? "Lobby" : MAP_DATA[player.map]?.name || "Unknown map";
+        map.title = map.textContent;
+        row.append(icon, name, power, map);
+        playerListRows.appendChild(row);
+      });
     }
 
     function renderRoomRoster() {
@@ -1750,7 +1938,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         const button = document.createElement("button");
         button.type = "button";
         const powerNameLabel = POWER_DATA[player.power]?.name || "Choosing a Power Guy";
-        button.innerHTML = `<strong>${player.username || "Player"}${player.id === multiplayerClient?.id ? " (You)" : ""}</strong><span>${player.map === "lobby" ? "Lobby" : MAP_DATA[player.map]?.name || "Unknown map"}</span>`;
+        const icon = Object.assign(document.createElement("img"), { src: playerIconArt(player.icon), alt: "" });
+        icon.className = "rosterIcon";
+        const name = document.createElement("strong");
+        name.textContent = `${player.username || "Player"}${player.id === multiplayerClient?.id ? " (You)" : ""}`;
+        const location = document.createElement("span");
+        location.textContent = player.map === "lobby" ? "Lobby" : MAP_DATA[player.map]?.name || "Unknown map";
+        button.append(icon, name, location);
         button.addEventListener("click", () => {
           lobbyPlayerDetail.textContent = `${player.username || "Player"} — ${powerNameLabel} — ${player.map === "lobby" ? "Waiting in the lobby" : MAP_DATA[player.map]?.name || "Unknown map"}`;
         });
@@ -1808,7 +2002,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           rememberRoomPlayer(player);
           ensureRemotePlayer(player);
         });
-        rememberRoomPlayer({ id: packet.id, username: localUsername, power: gameStarted ? selectedPower : "choosing", map: gameStarted ? selectedMap : "lobby", health: playerHealth });
+        rememberRoomPlayer({ id: packet.id, username: localUsername, icon: localPlayerIcon, power: gameStarted ? selectedPower : "choosing", map: gameStarted ? selectedMap : "lobby", health: playerHealth });
         packet.entities?.filter((entry) => entry.map === selectedMap).forEach((entry) => applyEntitySnapshot(entry.snapshot));
         if (selectedMap === "pvpArena") placeAtPvpSpawn(packet.id);
       }
@@ -1842,6 +2036,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
         roomPlayers.delete(packet.id);
         renderRoomRoster();
+        renderPlayerList();
         renderMapPopulation();
         removeRemotePlayer(packet.id);
       }
@@ -2289,8 +2484,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const targetMap = lobbyOnly || !gameStarted ? "lobby" : selectedMap;
       const targetPower = targetMap === "lobby" ? "choosing" : selectedPower || menuSelectedPower || "speed";
       if (multiplayerClient?.roomCode === roomCode && multiplayerClient.socket?.readyState === WebSocket.OPEN) {
-        multiplayerClient.send({ type: "hello", power: targetPower, map: targetMap, username: localUsername });
-        rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, power: targetPower, map: targetMap, health: playerHealth });
+        multiplayerClient.send({ type: "hello", power: targetPower, map: targetMap, username: localUsername, icon: localPlayerIcon });
+        rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, icon: localPlayerIcon, power: targetPower, map: targetMap, health: playerHealth });
         setLobbyConnection(true, `Connected to ${roomCode}`);
         return true;
       }
@@ -2307,10 +2502,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       });
       try {
         setLobbyConnection(false, `Connecting to ${roomCode}…`);
-        await multiplayerClient.connect(roomCode, { power: targetPower, map: targetMap, username: localUsername });
+        await multiplayerClient.connect(roomCode, { power: targetPower, map: targetMap, username: localUsername, icon: localPlayerIcon });
         multiplayerStatus.hidden = false;
         activeRoomCode.textContent = roomCode;
-        rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, power: targetPower, map: targetMap, health: playerHealth });
+        rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, icon: localPlayerIcon, power: targetPower, map: targetMap, health: playerHealth });
         setLobbyConnection(true, `Connected to ${roomCode}`);
         if (gameStarted) showMessage(`Online room ${roomCode}. Share this code with friends.`, 3400);
         return true;
@@ -3207,7 +3402,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         showMessage("Aim at an enemy or the floor", 750);
         return;
       }
-      webTrapCooldownUntil = now + 1150;
+      webTrapCooldownUntil = now + 5000;
       webShootPoseUntil = now + 560;
       const projectile = createWebNet(0.48);
       projectile.position.copy(webHandPosition());
@@ -4329,6 +4524,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       renderShiftLockState();
       if (shiftLockMode) {
         firstPersonMode = false;
+        frontViewMode = false;
         mouseNdc.set(0, 0);
         try {
           const lockRequest = renderer.domElement.requestPointerLock?.();
@@ -4483,6 +4679,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       flightMode = !flightMode;
       if (flightMode) {
         firstPersonMode = false;
+        frontViewMode = false;
         playerBody.velocity.y = Math.max(4.8, playerBody.velocity.y);
         renderer.domElement.requestPointerLock?.();
         playSfx("flightToggle");
@@ -5061,6 +5258,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
 
+      if (frontViewMode) {
+        playerGroup.visible = true;
+        const characterForward = new THREE.Vector3(Math.sin(playerGroup.rotation.y), 0, Math.cos(playerGroup.rotation.y));
+        camera.position.copy(playerPos).addScaledVector(characterForward, 5.6);
+        camera.position.y += 1.5;
+        camera.lookAt(playerPos.x, playerPos.y + 0.72, playerPos.z);
+        return;
+      }
+
       playerGroup.visible = true;
       const flightDistance = selectedPower === "flight" && flightMode ? Math.max(cameraDistance, 8.8) : cameraDistance;
       const horizontal = Math.cos(cameraPitch) * flightDistance;
@@ -5101,7 +5307,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       playerMaterialMain.color.setHex(selectedPower === "webs" ? 0xdc2626 : color);
       playerParts.leftArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : color);
       playerParts.rightArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : color);
-      playerParts.head.material.color.setHex(selectedPower === "robot" ? 0x1f2937 : 0xf8fafc);
+      playerParts.head.material.color.setHex(selectedPower === "robot" ? 0x111827 : 0xe5e7eb);
       playerParts.leftHand.material.color.setHex(selectedPower === "robot" ? 0x334155 : 0xf8fafc);
       playerParts.rightHand.material.color.setHex(selectedPower === "robot" ? 0x334155 : 0xf8fafc);
       playerParts.leftFoot.material.color.setHex(selectedPower === "jump" ? 0x38bdf8 : selectedPower === "speed" ? 0xffea00 : 0x111827);
@@ -5575,17 +5781,19 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const delta = Math.min(clock.getDelta(), 0.05);
       animateMenuPreview(now);
 
-      if (gamePaused) {
+      if (gamePaused && !onlineMode) {
         renderer.render(scene, camera);
         return;
       }
 
-      updateHeldDummy();
-      updateStrengthHeldBox();
-      updatePinnedDummy();
+      if (!gamePaused) {
+        updateHeldDummy();
+        updateStrengthHeldBox();
+        updatePinnedDummy();
+        updatePlayerControl(delta);
+        updateSuperJump(delta);
+      }
       updateRobotShield();
-      updatePlayerControl(delta);
-      updateSuperJump(delta);
       updateSpiderWebs(delta);
       updateMinions(delta);
       playerDamageFlash = Math.max(0, playerDamageFlash - delta);
@@ -5617,6 +5825,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       gameStarted = true;
       gamePaused = false;
       pauseOverlay.hidden = true;
+      playerList.hidden = true;
       keys.clear();
       flightMode = false;
       divePending = false;
@@ -5643,6 +5852,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       rightMouseDragging = false;
       renderShiftLockState();
       firstPersonMode = false;
+      frontViewMode = false;
       if (heldObject || telekinesisHeldPlayer) releaseTelekinesis();
       if (strengthHeldBox) {
         setStrengthEntityHeld(strengthHeldBox, false);
@@ -5659,9 +5869,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const data = POWER_DATA[power];
       playerTorso.material.color.setHex(data.color);
       playerParts.aura.material.color.setHex(data.color);
+      applyPowerFace(playerParts, power);
+      renderPlayerList();
       powerName.textContent = data.name;
       const map = MAP_DATA[selectedMap];
-      powerHelp.textContent = `${map.name}. ${data.help} WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V toggles first person. Esc pauses.`;
+      powerHelp.textContent = `${map.name}. ${data.help} WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V cycles camera views. Esc pauses.`;
       hud.style.display = "block";
       if (inventoryHud) inventoryHud.style.display = "block";
       fpsCounter.style.display = "block";
@@ -5707,7 +5919,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       playerBody.wakeUp();
       renderer.domElement.focus();
       if (multiplayerClient?.socket?.readyState === WebSocket.OPEN) {
-        multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, username: localUsername });
+        multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, username: localUsername, icon: localPlayerIcon });
       }
       connectToMultiplayer();
       roomPlayers.forEach((player) => ensureRemotePlayer(player));
@@ -5740,11 +5952,18 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (!gameStarted || gamePaused === paused) return;
       gamePaused = paused;
       releaseActiveInputs();
+      if (paused && onlineMode) {
+        moveIntensity = 0;
+        playerBody.velocity.x = 0;
+        playerBody.velocity.z = 0;
+      }
       pauseOverlay.hidden = !paused;
+      pauseOverlay.querySelector(".pauseEyebrow").textContent = onlineMode ? "Controls paused — room stays live" : "Game paused";
       if (paused) {
         if (document.pointerLockElement) document.exitPointerLock();
         resumeButton.focus();
         powerSwapSelect.value = selectedPower;
+        mapSwapSelect.value = selectedMap;
       } else {
         clock.getDelta();
         renderer.domElement.focus();
@@ -5764,8 +5983,20 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       startGame(nextPower);
       showMessage(`Switched to ${POWER_DATA[nextPower].name}`, 1600);
     });
+    swapMapButton.addEventListener("click", () => {
+      const nextMap = mapSwapSelect.value;
+      if (!MAP_DATA[nextMap] || (MAP_DATA[nextMap].onlineOnly && !onlineMode) || nextMap === selectedMap) {
+        setPaused(false);
+        return;
+      }
+      playSfx("menuTap");
+      resetSpiderWebState(true);
+      remotePlayers.forEach((remote) => removeRemotePlayer(remote.id));
+      selectedMap = nextMap;
+      startGame(selectedPower);
+      showMessage(`Deployed to ${MAP_DATA[nextMap].name}`, 1800);
+    });
 
-    let menuSelectedPower = null;
     let menuLaunching = false;
 
     function setMenuStep(step) {
@@ -5878,8 +6109,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         menuSelectedPower = button.dataset.power;
         updatePrototypePanelLabel(menuSelectedPower);
         if (onlineMode && multiplayerClient?.id) {
-          multiplayerClient.send({ type: "hello", power: menuSelectedPower, map: "lobby", username: localUsername });
-          rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, power: menuSelectedPower, map: "lobby", health: playerHealth });
+          multiplayerClient.send({ type: "hello", power: menuSelectedPower, map: "lobby", username: localUsername, icon: localPlayerIcon });
+          rememberRoomPlayer({ id: multiplayerClient.id, username: localUsername, icon: localPlayerIcon, power: menuSelectedPower, map: "lobby", health: playerHealth });
         }
         document.querySelectorAll(".powerCard").forEach((item) => item.classList.toggle("chosen", item === button));
         window.setTimeout(() => {
@@ -5932,7 +6163,18 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       setMenuStep("mode");
     });
 
+    function isTextEntryTarget(target) {
+      return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+    }
+
     window.addEventListener("keydown", (event) => {
+      if (isTextEntryTarget(event.target)) return;
+      if ((event.code === "Tab" || event.key === "Tab") && gameStarted && !event.repeat) {
+        event.preventDefault();
+        renderPlayerList();
+        playerList.hidden = !playerList.hidden;
+        return;
+      }
       if (event.code === "Escape" && gameStarted && !event.repeat) {
         event.preventDefault();
         setPaused(!gamePaused);
@@ -5959,8 +6201,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         toggleShiftLock();
       }
       if (event.code === "KeyV" && !event.repeat && gameStarted) {
-        firstPersonMode = !firstPersonMode;
-        showMessage(firstPersonMode ? "First person mode" : "Third person mode", 900);
+        if (!firstPersonMode && !frontViewMode) firstPersonMode = true;
+        else if (firstPersonMode) { firstPersonMode = false; frontViewMode = true; }
+        else frontViewMode = false;
+        showMessage(firstPersonMode ? "First person view" : frontViewMode ? "Front view" : "Third person view", 900);
       }
       if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "webs") {
         if (webWallWalkActive) jumpOffSpiderWall();
@@ -5979,6 +6223,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     });
 
     window.addEventListener("keyup", (event) => {
+      if (isTextEntryTarget(event.target)) return;
       if (gamePaused) return;
       keys.delete(event.code);
       if (event.code === "Space" && selectedPower === "webs") endSpiderSwing();
@@ -6020,7 +6265,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const lockedMouseLook = shiftLockMode || (
         document.pointerLockElement === renderer.domElement && selectedPower === "flight" && flightMode
       );
-      if (lockedMouseLook) {
+      if (shiftLockMode) {
+        cameraYaw -= event.movementX * 0.003;
+        cameraPitch += event.movementY * 0.0024;
+        cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.82, 0.42);
+      } else if (lockedMouseLook) {
         cameraYaw -= event.movementX * 0.003;
         cameraPitch -= event.movementY * 0.0024;
         cameraPitch = THREE.MathUtils.clamp(cameraPitch, selectedPower === "flight" && flightMode ? -0.72 : -0.42, selectedPower === "flight" && flightMode ? 0.88 : 0.82);

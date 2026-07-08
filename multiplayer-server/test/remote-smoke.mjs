@@ -21,9 +21,9 @@ function openClient() {
 const first = await openClient();
 first.socket.send(JSON.stringify({ type: "hello", username: "Alpha", power: "speed", map: "pvpArena" }));
 const second = await openClient();
-second.socket.send(JSON.stringify({ type: "hello", username: "Beta", power: "webs", map: "lobby" }));
+second.socket.send(JSON.stringify({ type: "hello", username: "Beta", icon: "symbol-webs", power: "webs", map: "lobby" }));
 await new Promise((resolve) => setTimeout(resolve, 100));
-second.socket.send(JSON.stringify({ type: "hello", username: "Beta", power: "webs", map: "pvpArena" }));
+second.socket.send(JSON.stringify({ type: "hello", username: "Beta", icon: "symbol-webs", power: "webs", map: "pvpArena" }));
 first.socket.send(JSON.stringify({ type: "state", state: { position: [0, 1, 650], forward: [1, 0, 0], yaw: 1, move: 1 } }));
 second.socket.send(JSON.stringify({ type: "state", state: { position: [2, 1, 650], forward: [-1, 0, 0], quaternion: [0, 0, 0, 1], pose: Array.from({ length: 19 }, () => [0, 1, 0, 0, 0, 0, 1, 1, 1, 1]), web: null } }));
 first.socket.send(JSON.stringify({ type: "entities", map: "pvpArena", snapshot: { dummies: [], objects: [{ id: 0, p: [1, 1, 650], q: [0, 0, 0, 1], v: [1, 0, 0] }] } }));
@@ -64,7 +64,7 @@ if (!second.messages.some((message) => message.type === "pvp-hit" && message.tar
 if (!second.messages.some((message) => message.type === "entities" && message.snapshot.objects.length === 1)) {
   throw new Error("The second client did not receive the shared object snapshot.");
 }
-if (!first.messages.some((message) => message.type === "player-updated" && message.player.username === "Beta" && message.player.map === "lobby") ||
+if (!first.messages.some((message) => message.type === "player-updated" && message.player.username === "Beta" && message.player.icon === "symbol-webs" && message.player.map === "lobby") ||
     !first.messages.some((message) => message.type === "player-updated" && message.player.username === "Beta" && message.player.map === "pvpArena")) {
   throw new Error("Lobby-to-map presence updates were not relayed.");
 }
@@ -141,7 +141,13 @@ await new Promise((resolve) => setTimeout(resolve, 150));
 if (!second.messages.some((message) => message.type === "web-trapped" && message.targetId === second.id)) {
   throw new Error("A direct Spider net did not trap the target player.");
 }
-await new Promise((resolve) => setTimeout(resolve, 1150));
+const trapCountDuringCooldown = third.messages.filter((message) => message.type === "web-trap-placed").length;
+first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-trap-place", point: [5, 1, 650] } }));
+await new Promise((resolve) => setTimeout(resolve, 180));
+if (third.messages.filter((message) => message.type === "web-trap-placed").length !== trapCountDuringCooldown) {
+  throw new Error("The Worker accepted a floor trap during the five-second direct-net cooldown.");
+}
+await new Promise((resolve) => setTimeout(resolve, 4900));
 first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-trap-place", point: [5, 1, 650] } }));
 await new Promise((resolve) => setTimeout(resolve, 100));
 third.socket.send(JSON.stringify({ type: "state", state: { position: [5, 1, 650], forward: [-1, 0, 0] } }));

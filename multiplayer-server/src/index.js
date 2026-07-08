@@ -14,7 +14,8 @@ const TELEKINESIS_GRAB_COOLDOWN = 1200;
 const ROBOT_SHIELD_DURATION = 5000;
 const ROBOT_SHIELD_COOLDOWN = 5000;
 const WEB_PULL_COOLDOWN = 850;
-const WEB_TRAP_COOLDOWN = 1150;
+const WEB_TRAP_COOLDOWN = 5000;
+const PLAYER_ICON_PATTERN = /^(portrait|symbol)-(speed|strength|teleport|telekinesis|flight|jump|robot|webs)$/;
 const WEB_TRAP_DURATION = 4600;
 const maxHealthForPower = (power) => power === "strength" ? 150 : 100;
 const ALLOWED_ORIGINS = new Set([
@@ -50,6 +51,11 @@ function sanitizeRoomCode(value) {
 function sanitizeUsername(value) {
   const name = String(value || "Player").replace(/[^a-zA-Z0-9 _-]/g, "").trim().slice(0, 18);
   return name || "Player";
+}
+
+function sanitizePlayerIcon(value) {
+  const icon = String(value || "portrait-speed");
+  return PLAYER_ICON_PATTERN.test(icon) ? icon : "portrait-speed";
 }
 
 function safeVector(value, fallback = [0, 0, 0]) {
@@ -108,7 +114,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, respawnAt: 0, grabbedBy: null, grabbedMode: null, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, respawnAt: 0, grabbedBy: null, grabbedMode: null, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -158,6 +164,7 @@ export class GameRoom {
       }
       player.map = String(message.map || "hub").slice(0, 24);
       player.username = sanitizeUsername(message.username);
+      player.icon = sanitizePlayerIcon(message.icon);
       this.savePlayer(socket, player);
       this.broadcast({ type: "player-updated", player: this.publicPlayer(player) }, player.id);
       return;
