@@ -2583,7 +2583,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       }
       if (packet.ability === "telekinesis-grab") telekinesisGrabCooldownUntil = Math.max(telekinesisGrabCooldownUntil, until);
       if (packet.ability === "web-trap") webTrapCooldownUntil = Math.max(webTrapCooldownUntil, until);
-      if (packet.ability === "flight-strike") flightStrikeCooldownUntil = Math.max(flightStrikeCooldownUntil, until);
+      if (packet.ability === "flight-strike") {
+        flightStrikeCooldownUntil = Math.max(flightStrikeCooldownUntil, until);
+        if (flightStrikeState?.optimistic && flightStrikeState.phase !== "descending") {
+          cancelFlightStrike(false);
+          showMessage(`Aerial strike ready in ${Math.max(1, Math.ceil((flightStrikeCooldownUntil - performance.now()) / 1000))}s`, 850);
+        }
+      }
     }
 
     function applyWebPullStart(packet) {
@@ -5068,15 +5074,22 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function requestFlightStrike() {
-      if (selectedPower !== "flight" || flightStrikeState || localDefeat) return;
+      if (selectedPower !== "flight") return false;
+      if (flightStrikeState || localDefeat) return true;
       const now = performance.now();
       if (now < flightStrikeCooldownUntil) {
         playSfx("cooldownDeny");
         showMessage(`Aerial strike ready in ${Math.ceil((flightStrikeCooldownUntil - now) / 1000)}s`, 750);
-        return;
+        return true;
       }
-      if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "flight-strike-start" });
-      else startFlightStrikeSequence({ id: "local", cooldownUntil: Date.now() + 12000 });
+      const onlineStrike = Boolean(onlineMode && multiplayerClient?.id);
+      startFlightStrikeSequence({
+        id: onlineStrike ? multiplayerClient.id : "local",
+        cooldownUntil: Date.now() + 12000,
+        optimistic: onlineStrike,
+      });
+      if (onlineStrike) multiplayerClient.sendAction({ kind: "flight-strike-start" });
+      return true;
     }
 
     function startFlightStrikeSequence(packet) {
@@ -5086,7 +5099,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         if (remote) remote.group.visible = false;
         return;
       }
-      if (flightStrikeState || selectedPower !== "flight") return;
+      if (selectedPower !== "flight") return;
+      if (flightStrikeState) {
+        if (packet.cooldownUntil) flightStrikeCooldownUntil = networkTimeToPerformance(packet.cooldownUntil);
+        flightStrikeState.optimistic = false;
+        flightStrikeState.serverConfirmed = true;
+        return;
+      }
       flightStrikeCooldownUntil = networkTimeToPerformance(packet.cooldownUntil);
       const marker = new THREE.Mesh(
         new THREE.RingGeometry(0.85, 1.15, 32),
@@ -5102,6 +5121,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         marker,
         target: threeFromCannon(playerBody.position),
         valid: false,
+        optimistic: Boolean(packet.optimistic),
+        serverConfirmed: !packet.optimistic,
+        descentFallbackTimer: 0,
+        targetSelectEndsAt: 0,
+        lastCountdownSecond: 0,
         savedCamera: { position: camera.position.clone(), quaternion: camera.quaternion.clone(), up: camera.up.clone() },
         savedFog: scene.fog,
         savedCameraFar: camera.far,
@@ -5119,6 +5143,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function cancelFlightStrike(notifyServer = true) {
       if (!flightStrikeState) return;
       if (notifyServer && onlineMode) multiplayerClient?.sendAction({ kind: "flight-strike-cancel" });
+      window.clearTimeout(flightStrikeState.descentFallbackTimer);
       scene.remove(flightStrikeState.marker);
       flightStrikeState.marker.geometry.dispose();
       flightStrikeState.marker.material.dispose();
@@ -5136,8 +5161,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function chooseFlightStrikeTarget() {
       if (flightStrikeState?.phase !== "targeting") return;
       const point = clampPointToMap(flightStrikeState.target.clone());
-      if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "flight-strike-impact", point: point.toArray() });
-      else beginFlightStrikeDescent({ id: "local", point: point.toArray(), map: selectedMap, seed: Date.now() >>> 0 });
+      if (onlineMode && multiplayerClient?.id) {
+        multiplayerClient.sendAction({ kind: "flight-strike-impact", point: point.toArray() });
+        window.clearTimeout(flightStrikeState.descentFallbackTimer);
+        flightStrikeState.descentFallbackTimer = window.setTimeout(() => {
+          if (flightStrikeState?.phase === "targeting") {
+            beginFlightStrikeDescent({ id: multiplayerClient?.id || "local", point: point.toArray(), map: selectedMap, seed: Date.now() >>> 0 });
+          }
+        }, flightStrikeState.serverConfirmed ? 850 : 180);
+      } else beginFlightStrikeDescent({ id: "local", point: point.toArray(), map: selectedMap, seed: Date.now() >>> 0 });
     }
 
     function beginFlightStrikeDescent(packet) {
@@ -5156,7 +5188,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
         return;
       }
-      if (!flightStrikeState) return;
+      if (!flightStrikeState || flightStrikeState.phase === "descending") return;
       flightStrikeState.phase = "descending";
       flightStrikeState.descentStartedAt = performance.now();
       flightStrikeState.target.copy(point);
@@ -5203,8 +5235,21 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerBody.velocity.set(0, 0, 0);
         playerBody.collisionResponse = false;
         playerBody.sleep();
+        state.targetSelectEndsAt = now + 10000;
+        state.lastCountdownSecond = 10;
+        showMessage("Choose landing point — 10s", 900);
       }
       if (state.phase === "targeting") {
+        const secondsLeft = Math.ceil((state.targetSelectEndsAt - now) / 1000);
+        if (secondsLeft <= 0) {
+          cancelFlightStrike(true);
+          showMessage("Aerial strike cancelled — time ran out", 1000);
+          return;
+        }
+        if (secondsLeft !== state.lastCountdownSecond) {
+          state.lastCountdownSecond = secondsLeft;
+          showMessage(`Choose landing point — ${secondsLeft}s`, 780);
+        }
         raycaster.setFromCamera(mouseNdc, camera);
         const hit = raycaster.intersectObjects(raycastTargets, true)
           .map((entry) => ({ ...entry, targetObject: resolveTarget(entry.object) }))
@@ -6862,6 +6907,33 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
     }
 
+    function handleSecondaryAbilityKey() {
+      if (!gameStarted) return false;
+      if (selectedPower === "flight") return requestFlightStrike();
+      if (selectedPower === "strength") {
+        toggleStrengthGrab();
+        broadcastSecondaryAbility();
+        return true;
+      }
+      if (selectedPower === "robot") {
+        toggleRobotShield();
+        broadcastSecondaryAbility();
+        return true;
+      }
+      if (selectedPower === "teleport") {
+        teleportMove();
+        broadcastSecondaryAbility();
+        return true;
+      }
+      if (selectedPower === "webs") {
+        shootSpiderNet();
+        broadcastSecondaryAbility();
+        return true;
+      }
+      broadcastSecondaryAbility();
+      return true;
+    }
+
     window.addEventListener("keydown", (event) => {
       if (isTextEntryTarget(event.target)) return;
       if ((event.code === "Tab" || event.key === "Tab") && gameStarted && !event.repeat) {
@@ -6923,12 +6995,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         else if (!flightMode) toggleFlight();
       }
       if (event.code === "KeyE" && !event.repeat && gameStarted) {
-        requestFlightStrike();
-        toggleStrengthGrab();
-        toggleRobotShield();
-        teleportMove();
-        shootSpiderNet();
-        broadcastSecondaryAbility();
+        handleSecondaryAbilityKey();
       }
       if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ControlLeft", "ControlRight", "KeyE", "ShiftLeft", "ShiftRight"].includes(event.code)) {
         event.preventDefault();
