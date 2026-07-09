@@ -29,7 +29,7 @@ export const POWER_DATA = {
     name: "Flight Guy",
     color: 0xf59e0b,
     speed: 7.4,
-    help: "Shift locks flight and mouse aim. Left click fires cape feathers when grounded, or angled dive-slams while flying."
+    help: "Hold Shift while running to charge the Fly-O-Meter. Jump, then press Space again when full to fly. Hold Shift in flight for turbo. E launches an aerial strike."
   },
   robot: {
     name: "Robot Suit Guy",

@@ -130,13 +130,13 @@ first.socket.send(JSON.stringify({ type: "hello", username: "Alpha", power: "web
 first.socket.send(JSON.stringify({ type: "state", state: { position: [0, 1, 650], forward: [1, 0, 0] } }));
 second.socket.send(JSON.stringify({ type: "state", state: { position: [3, 1, 650], forward: [-1, 0, 0] } }));
 third.socket.send(JSON.stringify({ type: "state", state: { position: [8, 1, 650], forward: [-1, 0, 0] } }));
-first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-pull-player", targetId: second.id } }));
+first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-pull-player", targetId: second.id, origin: [0, 1, 650], direction: [1, 0, 0], hitPoint: [3, 1, 650], flightMs: 63 } }));
 await new Promise((resolve) => setTimeout(resolve, 120));
 if (!second.messages.some((message) => message.type === "web-pull-start" && message.targetId === second.id)) {
   throw new Error("Spider web pull was not synchronized to the target player.");
 }
 first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-pull-release", targetId: second.id } }));
-first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-trap-player", targetId: second.id } }));
+first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-trap-player", targetId: second.id, origin: [0, 1, 650], direction: [1, 0, 0], hitPoint: [3, 1, 650], flightMs: 79 } }));
 await new Promise((resolve) => setTimeout(resolve, 150));
 if (!second.messages.some((message) => message.type === "web-trapped" && message.targetId === second.id)) {
   throw new Error("A direct Spider net did not trap the target player.");
@@ -147,7 +147,7 @@ await new Promise((resolve) => setTimeout(resolve, 180));
 if (third.messages.filter((message) => message.type === "web-trap-placed").length !== trapCountDuringCooldown) {
   throw new Error("The Worker accepted a floor trap during the five-second direct-net cooldown.");
 }
-await new Promise((resolve) => setTimeout(resolve, 4900));
+await new Promise((resolve) => setTimeout(resolve, 5300));
 first.socket.send(JSON.stringify({ type: "action", action: { kind: "web-trap-place", point: [5, 1, 650] } }));
 await new Promise((resolve) => setTimeout(resolve, 100));
 third.socket.send(JSON.stringify({ type: "state", state: { position: [5, 1, 650], forward: [-1, 0, 0] } }));
@@ -157,6 +157,50 @@ if (!third.messages.some((message) => message.type === "web-trap-placed")) {
 }
 if (!third.messages.some((message) => message.type === "web-trapped" && message.targetId === third.id)) {
   throw new Error("The armed floor web did not trap a player who entered it.");
+}
+third.socket.send(JSON.stringify({ type: "action", action: { kind: "web-escape", method: "pearl" } }));
+await new Promise((resolve) => setTimeout(resolve, 120));
+if (!third.messages.some((message) => message.type === "web-escaped" && message.id === third.id && message.method === "pearl" && message.pearls === 4)) {
+  throw new Error("The Worker did not validate and consume a Teleportation Pearl web escape.");
+}
+
+third.socket.send(JSON.stringify({ type: "hello", username: "Gamma", power: "flight", map: "pvpArena" }));
+third.socket.send(JSON.stringify({ type: "state", state: { position: [10, 1, 650], forward: [-1, 0, 0] } }));
+third.socket.send(JSON.stringify({ type: "action", action: { kind: "flight-strike-start" } }));
+await new Promise((resolve) => setTimeout(resolve, 620));
+third.socket.send(JSON.stringify({ type: "action", action: { kind: "flight-strike-impact", point: [10, 1, 650] } }));
+await new Promise((resolve) => setTimeout(resolve, 160));
+if (!first.messages.some((message) => message.type === "flight-strike-started" && message.id === third.id) ||
+    !first.messages.some((message) => message.type === "flight-strike-impact" && message.id === third.id)) {
+  throw new Error("The authoritative Flight Guy aerial strike was not synchronized.");
+}
+
+// Defeat is one authoritative, map-scoped event with enough stable data for
+// every same-map client to render the same seeded disassembly.
+third.socket.send(JSON.stringify({ type: "hello", username: "Gamma", power: "speed", map: "hub" }));
+await new Promise((resolve) => setTimeout(resolve, 100));
+const otherMapDefeatCount = third.messages.filter((message) => message.type === "player-defeated").length;
+for (let attempt = 0; attempt < 20 && !second.messages.some((message) => message.type === "player-defeated" && message.id === second.id); attempt += 1) {
+  first.socket.send(JSON.stringify({ type: "action", action: { kind: "attack" } }));
+  await new Promise((resolve) => setTimeout(resolve, 680));
+}
+const defeatEvents = second.messages.filter((message) => message.type === "player-defeated" && message.id === second.id);
+if (defeatEvents.length !== 1) {
+  throw new Error(`Expected exactly one authoritative defeat event, received ${defeatEvents.length}.`);
+}
+const defeat = defeatEvents[0];
+if (defeat.map !== "pvpArena" || defeat.attackerId !== first.id || defeat.power !== "robot" ||
+    !Number.isInteger(defeat.seed) || !Array.isArray(defeat.position) || !Array.isArray(defeat.orientation) || !defeat.defeatId) {
+  throw new Error("The defeat event was missing map, attacker, Power Guy, transform, sequence, or seed data.");
+}
+if (third.messages.filter((message) => message.type === "player-defeated").length !== otherMapDefeatCount) {
+  throw new Error("A player in another map received the defeat effect event.");
+}
+const relayedBeforeDefeatedAction = first.messages.filter((message) => message.type === "player-action" && message.id === second.id).length;
+second.socket.send(JSON.stringify({ type: "action", action: { kind: "visual-batch", events: [{ type: "sfx", name: "robotShot" }] } }));
+await new Promise((resolve) => setTimeout(resolve, 120));
+if (first.messages.filter((message) => message.type === "player-action" && message.id === second.id).length !== relayedBeforeDefeatedAction) {
+  throw new Error("The Worker relayed an ability from a defeated player.");
 }
 
 first.socket.close();

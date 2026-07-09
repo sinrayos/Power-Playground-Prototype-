@@ -712,6 +712,13 @@
       font-weight: 700;
     }
 
+    #flyMeter { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 5px 9px; align-items: center; font-size: 11px; font-weight: 800; color: #92400e; }
+    #flyMeter[hidden] { display: none; }
+    #flyMeter > div { height: 9px; overflow: hidden; border: 1px solid #f59e0b; border-radius: 999px; background: #fff7ed; }
+    #flyMeter i { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #f59e0b, #fde047, #ffffff); transition: width 90ms linear; }
+    #flyMeter strong { grid-column: 1 / -1; color: #64748b; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+    #flyMeter[data-state="full"] > div { box-shadow: 0 0 12px rgba(245,158,11,.75); }
+
     #shiftLockReticle {
       position: fixed;
       left: 50%;

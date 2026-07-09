@@ -3,6 +3,13 @@ const teleportSfxUrls = [
   new URL("../vwoop.mp3", import.meta.url).href,
   new URL("../teleport1_Cw1ot9l.mp3", import.meta.url).href
 ];
+const defeatSfxUrl = new URL("../roblox-death-sound_1.mp3", import.meta.url).href;
+const defeatSfxPool = Array.from({ length: 3 }, () => {
+  const audio = new Audio(defeatSfxUrl);
+  audio.preload = "auto";
+  return audio;
+});
+let nextDefeatSfxIndex = 0;
 let nextTeleportSfxIndex = 0;
 let menuMusicTimer = null;
 let menuMusicGain = null;
@@ -55,6 +62,17 @@ function playTeleportMp3(volume = 0.78) {
   audio.volume = volume;
   audio.play().catch(() => {
     // Browsers can block media before interaction; gameplay continues.
+  });
+}
+
+function playDefeatMp3() {
+  const audio = defeatSfxPool[nextDefeatSfxIndex];
+  nextDefeatSfxIndex = (nextDefeatSfxIndex + 1) % defeatSfxPool.length;
+  audio.pause();
+  audio.currentTime = 0;
+  audio.volume = 0.82;
+  audio.play().catch(() => {
+    // The shared audio-unlock path will make later defeat sounds available.
   });
 }
 
@@ -120,6 +138,7 @@ export function stopMenuMusic() {
 
 export function playSfx(name) {
   try {
+    if (name === "playerDefeat") playDefeatMp3();
     if (name === "menuTap") {
       playTone(620, 0.07, "sine", 0.022, 820);
       playTone(1040, 0.055, "triangle", 0.012, 1220);
@@ -176,6 +195,22 @@ export function playSfx(name) {
     if (name === "telekinesisHold") playTone(330, 0.28, "triangle", 0.036, 520);
     if (name === "telekinesisThrow") playTone(460, 0.16, "sawtooth", 0.045, 120);
     if (name === "flightToggle") playTone(260, 0.2, "sine", 0.04, 620);
+    if (name === "flightSprint") {
+      playNoise(0.16, 0.024, 1100);
+      playTone(420, 0.12, "triangle", 0.018, 760);
+    }
+    if (name === "flightTurbo") {
+      playNoise(0.2, 0.035, 850);
+      playTone(180, 0.18, "sawtooth", 0.026, 520);
+    }
+    if (name === "flightLaunch") {
+      playNoise(0.34, 0.05, 600);
+      playTone(110, 0.34, "sawtooth", 0.05, 980);
+    }
+    if (name === "flightStrike") {
+      playTone(70, 0.24, "triangle", 0.075, 36);
+      playNoise(0.3, 0.055, 180);
+    }
     if (name === "dive") {
       playTone(520, 0.18, "sawtooth", 0.035, 75);
       playTone(90, 0.18, "triangle", 0.06, 45);

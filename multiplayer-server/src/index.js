@@ -8,15 +8,21 @@ const ATTACKS = {
   flight: { damage: 15, range: 9, knockback: 6, radial: true, cooldown: 500 },
   robot: { damage: 8, range: 55, knockback: 2.4, cone: 0.9, cooldown: 850 },
   jump: { damage: 17, range: 8, knockback: 6, radial: true, cooldown: 450 },
-  webs: { damage: 10, range: 8, knockback: 3, cone: 0.05, cooldown: 340 },
+  webs: { damage: 10, range: 8, knockback: 3, cone: 0.05, cooldown: 650 },
 };
 const TELEKINESIS_GRAB_COOLDOWN = 1200;
 const ROBOT_SHIELD_DURATION = 5000;
 const ROBOT_SHIELD_COOLDOWN = 5000;
-const WEB_PULL_COOLDOWN = 850;
+const WEB_PULL_COOLDOWN = 1000;
 const WEB_TRAP_COOLDOWN = 5000;
 const PLAYER_ICON_PATTERN = /^(portrait|symbol)-(speed|strength|teleport|telekinesis|flight|jump|robot|webs)$/;
-const WEB_TRAP_DURATION = 4600;
+const WEB_TRAP_DURATION = 3200;
+const DEFEAT_RESPAWN_DELAY = 4400;
+const FLIGHT_STRIKE_COOLDOWN = 12000;
+const MAP_BOUNDS = {
+  hub: [-23.6, 23.6, -23.6, 23.6], speedTrack: [-56.5, 56.5, 70.5, 161.5], minionArena: [-35.5, 35.5, 184.5, 253.5],
+  strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688],
+};
 const maxHealthForPower = (power) => power === "strength" ? 150 : 100;
 const ALLOWED_ORIGINS = new Set([
   "https://powerplayground.netlify.app",
@@ -62,6 +68,29 @@ function safeVector(value, fallback = [0, 0, 0]) {
   if (!Array.isArray(value) || value.length < 3) return fallback;
   return value.slice(0, 3).map((number, index) => Number.isFinite(Number(number)) ? Math.max(-1000, Math.min(1000, Number(number))) : fallback[index]);
 }
+
+function segmentIntersectsAabb(start, end, box) {
+  let near = 0;
+  let far = 1;
+  for (let axis = 0; axis < 3; axis += 1) {
+    const delta = end[axis] - start[axis];
+    if (Math.abs(delta) < 1e-6) {
+      if (start[axis] < box.min[axis] || start[axis] > box.max[axis]) return false;
+      continue;
+    }
+    const a = (box.min[axis] - start[axis]) / delta;
+    const b = (box.max[axis] - start[axis]) / delta;
+    near = Math.max(near, Math.min(a, b));
+    far = Math.min(far, Math.max(a, b));
+    if (near > far) return false;
+  }
+  return near > 0.025 && near < 0.96;
+}
+
+const PVP_WEB_BLOCKERS = [
+  [-18, 2, 635, 9, 4, 3], [18, 2, 665, 9, 4, 3], [-18, 2, 665, 3, 4, 9], [18, 2, 635, 3, 4, 9],
+  [0, 1.25, 650, 12, 2.5, 12], [0, 3.7, 650, 6, 2.4, 6],
+].map(([x, y, z, sx, sy, sz]) => ({ min: [x - sx / 2, y - sy / 2, z - sz / 2], max: [x + sx / 2, y + sy / 2, z + sz / 2] }));
 
 export default {
   async fetch(request, env) {
@@ -114,7 +143,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, respawnAt: 0, grabbedBy: null, grabbedMode: null, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -151,12 +180,14 @@ export class GameRoom {
       if (player.map !== String(message.map || "hub")) {
         this.releaseVictimsHeldBy(player.id);
         this.releaseWebVictimsBy(player.id);
+        player.flightStrike = null;
       }
       const nextPower = String(message.power || "speed").slice(0, 24);
       if (player.power !== nextPower || !player.maxHealth) {
         player.power = nextPower;
         player.maxHealth = maxHealthForPower(nextPower);
         player.health = player.maxHealth;
+        player.pearls = nextPower === "speed" ? 5 : 0;
         player.shieldActive = false;
         player.shieldEndsAt = 0;
         player.shieldCooldownUntil = 0;
@@ -174,6 +205,7 @@ export class GameRoom {
       if (player.respawnAt && Date.now() >= player.respawnAt) {
         player.health = player.maxHealth || maxHealthForPower(player.power);
         player.respawnAt = 0;
+        player.activeDefeatId = null;
         this.broadcast({ type: "player-respawn", id: player.id, health: player.health });
         this.send(socket, { type: "player-respawn", id: player.id, health: player.health });
       }
@@ -204,6 +236,7 @@ export class GameRoom {
 
     if (message.type === "action") {
       const action = message.action && typeof message.action === "object" ? message.action : {};
+      if (player.health <= 0 || player.respawnAt) return;
       if (action.kind === "strength-grab-player") return this.handleStrengthGrab(player, action);
       if (action.kind === "strength-throw-player") return this.handleStrengthThrow(player, action);
       if (action.kind === "telekinesis-grab-player") return this.handleTelekinesisGrab(player, action);
@@ -215,6 +248,10 @@ export class GameRoom {
       if (action.kind === "web-pull-release") return this.handleWebPullRelease(player, action);
       if (action.kind === "web-trap-player") return this.handleWebTrapPlayer(player, action);
       if (action.kind === "web-trap-place") return this.handleWebTrapPlace(player, action);
+      if (action.kind === "web-escape") return this.handleWebEscape(player, action);
+      if (action.kind === "flight-strike-start") return this.handleFlightStrikeStart(player);
+      if (action.kind === "flight-strike-impact") return this.handleFlightStrikeImpact(player, action);
+      if (action.kind === "flight-strike-cancel") return this.handleFlightStrikeCancel(player);
       if (action.kind === "strength-release-player") {
         this.releaseVictimsHeldBy(player.id);
         return;
@@ -280,7 +317,7 @@ export class GameRoom {
       return;
     }
     target.health = Math.max(0, target.health - 18);
-    target.respawnAt = target.health <= 0 ? Date.now() + 2500 : 0;
+    target.respawnAt = target.health <= 0 ? Date.now() + DEFEAT_RESPAWN_DELAY : 0;
     this.savePlayer(target.socket, target);
     this.broadcast({
       type: "player-thrown",
@@ -293,6 +330,7 @@ export class GameRoom {
       respawnAt: target.respawnAt,
       mode: "strength",
     });
+    if (target.health <= 0) this.announceDefeat(target, attacker);
   }
 
   handleTelekinesisGrab(attacker, action) {
@@ -341,9 +379,10 @@ export class GameRoom {
       return;
     }
     target.health = Math.max(0, target.health - 9);
-    target.respawnAt = target.health <= 0 ? Date.now() + 2500 : 0;
+    target.respawnAt = target.health <= 0 ? Date.now() + DEFEAT_RESPAWN_DELAY : 0;
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "player-thrown", attackerId: attacker.id, targetId: target.id, health: target.health, damage: 9, impulse, defeated: target.health <= 0, respawnAt: target.respawnAt, mode: "telekinesis" });
+    if (target.health <= 0) this.announceDefeat(target, attacker);
   }
 
   handleTelekinesisSlam(target, action) {
@@ -355,13 +394,14 @@ export class GameRoom {
     target.lastTelekinesisSlamAt = now;
     if (this.blockDamage(holder, target, "telekinesis")) return;
     target.health = Math.max(0, target.health - 5);
-    target.respawnAt = target.health <= 0 ? now + 2500 : 0;
+    target.respawnAt = target.health <= 0 ? now + DEFEAT_RESPAWN_DELAY : 0;
     if (target.health <= 0) {
       target.grabbedBy = null;
       target.grabbedMode = null;
     }
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "pvp-hit", attackerId: holder.id, targetId: target.id, health: target.health, damage: 5, impulse: [0, 0, 0], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "telekinesis", slam: true, position: safeVector(action.position, target.state?.position || [0, 0, 0]) });
+    if (target.health <= 0) this.announceDefeat(target, holder);
   }
 
   handleStrengthEntityThrow(attacker, action) {
@@ -395,9 +435,10 @@ export class GameRoom {
     const horizontalLength = Math.hypot(thrown.velocity[0], thrown.velocity[2]) || 1;
     const direction = [thrown.velocity[0] / horizontalLength, 0, thrown.velocity[2] / horizontalLength];
     target.health = Math.max(0, target.health - thrown.damage);
-    target.respawnAt = target.health <= 0 ? Date.now() + 2500 : 0;
+    target.respawnAt = target.health <= 0 ? Date.now() + DEFEAT_RESPAWN_DELAY : 0;
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "pvp-hit", attackerId: attacker.id, targetId: target.id, health: target.health, damage: thrown.damage, impulse: [direction[0] * 7, 3, direction[2] * 7], defeated: target.health <= 0, respawnAt: target.respawnAt, power: thrown.power });
+    if (target.health <= 0) this.announceDefeat(target, attacker);
   }
 
   handleStrongSword(attacker) {
@@ -418,9 +459,10 @@ export class GameRoom {
       if ((dx / distance) * forward[0] + (dz / distance) * forward[2] < 0.15) continue;
       if (this.blockDamage(attacker, target, "strength")) continue;
       target.health = Math.max(0, target.health - 14);
-      target.respawnAt = target.health <= 0 ? now + 2500 : 0;
+      target.respawnAt = target.health <= 0 ? now + DEFEAT_RESPAWN_DELAY : 0;
       this.savePlayer(target.socket, target);
       this.broadcast({ type: "pvp-hit", attackerId: attacker.id, targetId: target.id, health: target.health, damage: 14, impulse: [(dx / distance) * 4, 1.5, (dz / distance) * 4], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "strength" });
+      if (target.health <= 0) this.announceDefeat(target, attacker);
     }
   }
 
@@ -438,7 +480,7 @@ export class GameRoom {
     this.savePlayer(attacker.socket, attacker);
     if (this.blockDamage(attacker, target, "teleport")) return;
     target.health = Math.max(0, target.health - 18);
-    target.respawnAt = target.health <= 0 ? now + 2500 : 0;
+    target.respawnAt = target.health <= 0 ? now + DEFEAT_RESPAWN_DELAY : 0;
     this.savePlayer(target.socket, target);
     const length = distance || 1;
     this.broadcast({
@@ -452,9 +494,10 @@ export class GameRoom {
       respawnAt: target.respawnAt,
       power: "teleport",
     });
+    if (target.health <= 0) this.announceDefeat(target, attacker);
   }
 
-  webTarget(attacker, targetId, range, minDot = 0.72) {
+  webTarget(attacker, targetId, range, projectile = {}) {
     const target = this.players.get(String(targetId || ""));
     if (!target || target.id === attacker.id || attacker.power !== "webs") return null;
     if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return null;
@@ -464,14 +507,22 @@ export class GameRoom {
     const dz = target.state.position[2] - attacker.state.position[2];
     const distance = Math.hypot(dx, dy, dz);
     if (distance < 0.01 || distance > range) return null;
-    const horizontal = Math.hypot(dx, dz) || 1;
-    const forward = attacker.state.forward || [0, 0, -1];
-    if ((dx / horizontal) * forward[0] + (dz / horizontal) * forward[2] < minDot) return null;
+    const origin = safeVector(projectile.origin, attacker.state.position);
+    const direction = safeVector(projectile.direction, attacker.state.forward || [0, 0, -1]);
+    const directionLength = Math.hypot(...direction) || 1;
+    const normalized = direction.map((value) => value / directionLength);
+    if (Math.hypot(origin[0] - attacker.state.position[0], origin[1] - attacker.state.position[1], origin[2] - attacker.state.position[2]) > 2.8) return null;
+    const along = dx * normalized[0] + dy * normalized[1] + dz * normalized[2];
+    const missDistance = Math.hypot(dx - normalized[0] * along, dy - normalized[1] * along, dz - normalized[2] * along);
+    const flightMs = Number(projectile.flightMs);
+    const expectedMs = Math.max(0, along) / (projectile.mode === "pull" ? 48 : 38) * 1000;
+    if (along < 0 || along > range || missDistance > 1.15 || !Number.isFinite(flightMs) || Math.abs(flightMs - expectedMs) > 380) return null;
+    if (attacker.map === "pvpArena" && PVP_WEB_BLOCKERS.some((box) => segmentIntersectsAabb(origin, target.state.position, box))) return null;
     return { target, distance };
   }
 
   handleWebPull(attacker, action) {
-    const result = this.webTarget(attacker, action.targetId, 52, 0.72);
+    const result = this.webTarget(attacker, action.targetId, 52, { ...action, mode: "pull" });
     if (!result) return;
     const now = Date.now();
     if (now - (attacker.lastWebPullAt || 0) < WEB_PULL_COOLDOWN) return;
@@ -495,7 +546,7 @@ export class GameRoom {
   }
 
   handleWebTrapPlayer(attacker, action) {
-    const result = this.webTarget(attacker, action.targetId, 44, 0.76);
+    const result = this.webTarget(attacker, action.targetId, 44, { ...action, mode: "trap" });
     if (!result) return;
     const now = Date.now();
     if (now - (attacker.lastWebTrapAt || 0) < WEB_TRAP_COOLDOWN) return;
@@ -547,6 +598,78 @@ export class GameRoom {
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "web-trapped", attackerId: attacker.id, targetId: target.id, anchor: target.webTrapAnchor, endsAt: target.webTrappedUntil });
     return true;
+  }
+
+  handleWebEscape(player, action) {
+    const now = Date.now();
+    if (!player.webTrappedUntil || player.webTrappedUntil <= now || player.health <= 0) return;
+    const method = String(action.method || "");
+    if (player.power === "teleport" && method !== "teleport") return;
+    if (player.power === "speed") {
+      if (method !== "pearl" || (Number(player.pearls) || 0) <= 0) return;
+      player.pearls -= 1;
+    } else if (player.power !== "teleport") return;
+    let escapePosition = player.state?.position || [0, 0, 0];
+    if (method === "teleport") {
+      const destination = safeVector(action.destination, escapePosition);
+      const bounds = MAP_BOUNDS[player.map];
+      if (!bounds || Math.hypot(destination[0] - escapePosition[0], destination[1] - escapePosition[1], destination[2] - escapePosition[2]) > 58 ||
+          destination[0] < bounds[0] || destination[0] > bounds[1] || destination[2] < bounds[2] || destination[2] > bounds[3]) return;
+      escapePosition = destination;
+      if (player.state) player.state.position = destination;
+    }
+    const attackerId = player.webTrappedBy;
+    player.webTrappedBy = null;
+    player.webTrappedUntil = 0;
+    player.webTrapAnchor = null;
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, { type: "web-escaped", id: player.id, attackerId, method, pearls: player.pearls, position: escapePosition });
+  }
+
+  handleFlightStrikeStart(player) {
+    const now = Date.now();
+    if (player.power !== "flight" || player.health <= 0 || player.grabbedBy || player.webTrappedUntil > now || player.flightStrike) return;
+    if (now - (player.lastFlightStrikeAt || 0) < FLIGHT_STRIKE_COOLDOWN) {
+      this.send(player.socket, { type: "ability-cooldown", ability: "flight-strike", cooldownUntil: (player.lastFlightStrikeAt || 0) + FLIGHT_STRIKE_COOLDOWN });
+      return;
+    }
+    player.lastFlightStrikeAt = now;
+    player.flightStrike = { startedAt: now, map: player.map };
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, { type: "flight-strike-started", id: player.id, map: player.map, startedAt: now, cooldownUntil: now + FLIGHT_STRIKE_COOLDOWN });
+  }
+
+  handleFlightStrikeImpact(player, action) {
+    const now = Date.now();
+    const strike = player.flightStrike;
+    if (!strike || strike.map !== player.map || now - strike.startedAt < 500 || now - strike.startedAt > 16000) return;
+    const point = safeVector(action.point);
+    const bounds = MAP_BOUNDS[player.map];
+    if (!bounds || point[0] < bounds[0] || point[0] > bounds[1] || point[2] < bounds[2] || point[2] > bounds[3]) return;
+    player.flightStrike = null;
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, { type: "flight-strike-impact", id: player.id, map: player.map, point, seed: (strike.startedAt ^ point[0] * 997 ^ point[2] * 991) >>> 0 });
+    if (player.map !== "pvpArena") return;
+    for (const target of this.players.values()) {
+      if (target.id === player.id || target.map !== player.map || target.health <= 0 || !target.state?.position) continue;
+      const dx = target.state.position[0] - point[0];
+      const dz = target.state.position[2] - point[2];
+      const distance = Math.hypot(dx, dz);
+      if (distance > 7.5 || this.blockDamage(player, target, "flight")) continue;
+      const scale = Math.max(0.25, 1 - distance / 9);
+      target.health = Math.max(0, target.health - Math.round(24 * scale));
+      target.respawnAt = target.health <= 0 ? now + DEFEAT_RESPAWN_DELAY : 0;
+      this.savePlayer(target.socket, target);
+      this.broadcast({ type: "pvp-hit", attackerId: player.id, targetId: target.id, health: target.health, damage: Math.round(24 * scale), impulse: [(dx / Math.max(distance, 0.1)) * 8 * scale, 5 * scale, (dz / Math.max(distance, 0.1)) * 8 * scale], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "flight", position: point });
+      if (target.health <= 0) this.announceDefeat(target, player);
+    }
+  }
+
+  handleFlightStrikeCancel(player) {
+    if (!player.flightStrike) return;
+    player.flightStrike = null;
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, { type: "flight-strike-cancelled", id: player.id, map: player.map });
   }
 
   expireWebStatus(player, now = Date.now()) {
@@ -690,7 +813,7 @@ export class GameRoom {
       if (!spec.radial && dot < spec.cone) continue;
       if (this.blockDamage(attacker, target, attacker.power)) continue;
       target.health = Math.max(0, target.health - spec.damage);
-      target.respawnAt = target.health <= 0 ? Date.now() + 2500 : 0;
+      target.respawnAt = target.health <= 0 ? Date.now() + DEFEAT_RESPAWN_DELAY : 0;
       if (target.health <= 0) {
         target.grabbedBy = null;
         target.grabbedMode = null;
@@ -708,8 +831,45 @@ export class GameRoom {
         power: attacker.power,
       };
       this.broadcast(hit);
+      if (target.health <= 0) this.announceDefeat(target, attacker);
     }
     return true;
+  }
+
+  announceDefeat(target, attacker) {
+    if (target.activeDefeatId) return;
+    target.defeatSequence = (Number(target.defeatSequence) || 0) + 1;
+    target.activeDefeatId = `${target.id}:${target.defeatSequence}`;
+    target.respawnAt = target.respawnAt || Date.now() + DEFEAT_RESPAWN_DELAY;
+    target.grabbedBy = null;
+    target.grabbedMode = null;
+    target.shieldActive = false;
+    target.shieldEndsAt = 0;
+    target.flightStrike = null;
+    this.clearWebStatus(target);
+    this.releaseVictimsHeldBy(target.id);
+    this.releaseWebVictimsBy(target.id);
+    this.savePlayer(target.socket, target);
+    const forward = safeVector(target.state?.forward, [0, 0, -1]);
+    const quaternion = Array.isArray(target.state?.quaternion)
+      ? target.state.quaternion.slice(0, 4).map((value, index) => Number.isFinite(Number(value)) ? Number(value) : (index === 3 ? 1 : 0))
+      : [0, 0, 0, 1];
+    let seed = 2166136261;
+    for (const char of target.activeDefeatId) seed = Math.imul(seed ^ char.charCodeAt(0), 16777619) >>> 0;
+    this.broadcastToMap(target.map, {
+      type: "player-defeated",
+      defeatId: target.activeDefeatId,
+      id: target.id,
+      attackerId: attacker?.id || null,
+      map: target.map,
+      position: safeVector(target.state?.position),
+      orientation: quaternion,
+      forward,
+      power: target.power,
+      seed,
+      defeatedAt: Date.now(),
+      respawnAt: target.respawnAt,
+    });
   }
 
   webSocketClose(socket) {
@@ -759,6 +919,18 @@ export class GameRoom {
         player.socket.send(encoded);
       } catch {
         // The runtime will report the closed socket through webSocketClose/error.
+      }
+    }
+  }
+
+  broadcastToMap(map, message) {
+    const encoded = JSON.stringify(message);
+    for (const player of this.players.values()) {
+      if (player.map !== map) continue;
+      try {
+        player.socket.send(encoded);
+      } catch {
+        // Closed sockets are cleaned up by the runtime callbacks.
       }
     }
   }
