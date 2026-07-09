@@ -15,6 +15,8 @@ const STRENGTH_PLAYER_GRAB_COOLDOWN = 1500;
 const ROBOT_SHIELD_DURATION = 5000;
 const ROBOT_SHIELD_COOLDOWN = 5000;
 const TELEPORT_BACKSTAB_COOLDOWN = 1500;
+const PHASE_BOOTS_DURATION = 5000;
+const PHASE_BOOTS_COOLDOWN = 10000;
 const HOLD_ESCAPE_TAP_GAIN = 0.065;
 const HOLD_ESCAPE_DECAY_PER_SECOND = 0.12;
 const WEB_PULL_COOLDOWN = 1000;
@@ -147,7 +149,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -185,6 +187,8 @@ export class GameRoom {
         this.releaseVictimsHeldBy(player.id);
         this.releaseWebVictimsBy(player.id);
         player.flightStrike = null;
+        player.phaseBootsActive = false;
+        player.phaseBootsEndsAt = 0;
       }
       const nextPower = String(message.power || "speed").slice(0, 24);
       if (player.power !== nextPower || !player.maxHealth) {
@@ -195,6 +199,9 @@ export class GameRoom {
         player.shieldActive = false;
         player.shieldEndsAt = 0;
         player.shieldCooldownUntil = 0;
+        player.phaseBootsActive = false;
+        player.phaseBootsEndsAt = 0;
+        player.phaseBootsCooldownUntil = 0;
         this.clearWebStatus(player);
       }
       player.map = String(message.map || "hub").slice(0, 24);
@@ -215,6 +222,7 @@ export class GameRoom {
       }
       this.expireShield(player);
       this.expireWebStatus(player);
+      this.expirePhaseBoots(player);
       const holder = player.grabbedBy ? this.players.get(player.grabbedBy) : null;
       if (player.grabbedBy && !holder) {
         player.grabbedBy = null;
@@ -233,6 +241,9 @@ export class GameRoom {
         position: statePosition,
         forward: safeVector(message.state.forward, [0, 0, -1]),
         health: player.health,
+        phaseBootsActive: this.isPhaseBootsActive(player),
+        phaseBootsEndsAt: player.phaseBootsEndsAt || 0,
+        phaseBootsCooldownUntil: player.phaseBootsCooldownUntil || 0,
       };
       this.savePlayer(socket, player);
       this.checkWebTraps(player);
@@ -251,6 +262,7 @@ export class GameRoom {
       if (action.kind === "telekinesis-slam-player") return this.handleTelekinesisSlam(player, action);
       if (action.kind === "hold-escape-tap") return this.handleHoldEscapeTap(player);
       if (action.kind === "robot-shield-toggle") return this.handleRobotShieldToggle(player);
+      if (action.kind === "phase-boots") return this.handlePhaseBoots(player);
       if (action.kind === "web-pull-player") return this.handleWebPull(player, action);
       if (action.kind === "web-pull-release") return this.handleWebPullRelease(player, action);
       if (action.kind === "web-trap-player") return this.handleWebTrapPlayer(player, action);
@@ -560,27 +572,41 @@ export class GameRoom {
     if (!target || target.id === attacker.id || attacker.power !== "webs") return null;
     if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return null;
     if (attacker.grabbedBy || !attacker.state?.position || !target.state?.position) return null;
-    const dx = target.state.position[0] - attacker.state.position[0];
-    const dy = target.state.position[1] - attacker.state.position[1];
-    const dz = target.state.position[2] - attacker.state.position[2];
-    const distance = Math.hypot(dx, dy, dz);
+    const baseDx = target.state.position[0] - attacker.state.position[0];
+    const baseDy = target.state.position[1] - attacker.state.position[1];
+    const baseDz = target.state.position[2] - attacker.state.position[2];
+    const distance = Math.hypot(baseDx, baseDy, baseDz);
     if (distance < 0.01 || distance > range) return null;
     const origin = safeVector(projectile.origin, attacker.state.position);
     const direction = safeVector(projectile.direction, attacker.state.forward || [0, 0, -1]);
     const directionLength = Math.hypot(...direction) || 1;
     const normalized = direction.map((value) => value / directionLength);
-    if (Math.hypot(origin[0] - attacker.state.position[0], origin[1] - attacker.state.position[1], origin[2] - attacker.state.position[2]) > 2.8) return null;
-    const along = dx * normalized[0] + dy * normalized[1] + dz * normalized[2];
-    const missDistance = Math.hypot(dx - normalized[0] * along, dy - normalized[1] * along, dz - normalized[2] * along);
+    const originLimit = projectile.mode === "pull" ? 16 : 2.8;
+    if (Math.hypot(origin[0] - attacker.state.position[0], origin[1] - attacker.state.position[1], origin[2] - attacker.state.position[2]) > originLimit) return null;
+    const bodyPoints = projectile.mode === "pull"
+      ? [0.35, 0.82, 1.28, 1.72].map((height) => [target.state.position[0], target.state.position[1] + height, target.state.position[2]])
+      : [target.state.position];
+    let bestHit = null;
+    for (const point of bodyPoints) {
+      const dx = point[0] - origin[0];
+      const dy = point[1] - origin[1];
+      const dz = point[2] - origin[2];
+      const along = dx * normalized[0] + dy * normalized[1] + dz * normalized[2];
+      const missDistance = Math.hypot(dx - normalized[0] * along, dy - normalized[1] * along, dz - normalized[2] * along);
+      if (along < 0 || along > range || (bestHit && missDistance >= bestHit.missDistance)) continue;
+      bestHit = { point, along, missDistance };
+    }
+    if (!bestHit) return null;
     const flightMs = Number(projectile.flightMs);
-    const expectedMs = Math.max(0, along) / (projectile.mode === "pull" ? 48 : 38) * 1000;
-    if (along < 0 || along > range || missDistance > 1.15 || !Number.isFinite(flightMs) || Math.abs(flightMs - expectedMs) > 380) return null;
-    if (attacker.map === "pvpArena" && PVP_WEB_BLOCKERS.some((box) => segmentIntersectsAabb(origin, target.state.position, box))) return null;
+    const expectedMs = Math.max(0, bestHit.along) / (projectile.mode === "pull" ? 48 : 38) * 1000;
+    const hitRadius = projectile.mode === "pull" ? 1.7 : 1.15;
+    if (bestHit.missDistance > hitRadius || !Number.isFinite(flightMs) || Math.abs(flightMs - expectedMs) > 380) return null;
+    if (attacker.map === "pvpArena" && PVP_WEB_BLOCKERS.some((box) => segmentIntersectsAabb(origin, bestHit.point, box))) return null;
     return { target, distance };
   }
 
   handleWebPull(attacker, action) {
-    const result = this.webTarget(attacker, action.targetId, 52, { ...action, mode: "pull" });
+    const result = this.webTarget(attacker, action.targetId, 360, { ...action, mode: "pull" });
     if (!result) return;
     const now = Date.now();
     if (now - (attacker.lastWebPullAt || 0) < WEB_PULL_COOLDOWN) {
@@ -590,7 +616,7 @@ export class GameRoom {
     attacker.lastWebPullAt = now;
     this.savePlayer(attacker.socket, attacker);
     if (this.blockDamage(attacker, result.target, "webs")) return;
-    const duration = Math.max(520, Math.min(1150, result.distance * 34));
+    const duration = Math.max(520, Math.min(2600, result.distance * 34));
     result.target.webPulledBy = attacker.id;
     result.target.webPullEndsAt = now + duration;
     this.savePlayer(result.target.socket, result.target);
@@ -788,6 +814,57 @@ export class GameRoom {
       this.webTraps.delete(trapId);
       this.broadcast({ type: "web-trap-removed", trapId });
     }
+  }
+
+  isPhaseBootsActive(player, now = Date.now()) {
+    return player.power === "teleport" && Boolean(player.phaseBootsActive) && now < (player.phaseBootsEndsAt || 0);
+  }
+
+  handlePhaseBoots(player) {
+    const now = Date.now();
+    this.expirePhaseBoots(player, now);
+    if (player.power !== "teleport" || player.health <= 0 || player.grabbedBy || player.webTrappedUntil > now) return;
+    if (this.isPhaseBootsActive(player, now)) {
+      this.send(player.socket, {
+        type: "phase-boots-state",
+        id: player.id,
+        active: true,
+        endsAt: player.phaseBootsEndsAt || 0,
+        cooldownUntil: player.phaseBootsCooldownUntil || 0,
+      });
+      return;
+    }
+    if (now < (player.phaseBootsCooldownUntil || 0)) {
+      this.send(player.socket, { type: "ability-cooldown", ability: "phase-boots", cooldownUntil: player.phaseBootsCooldownUntil });
+      return;
+    }
+    player.phaseBootsActive = true;
+    player.phaseBootsEndsAt = now + PHASE_BOOTS_DURATION;
+    player.phaseBootsCooldownUntil = player.phaseBootsEndsAt + PHASE_BOOTS_COOLDOWN;
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, {
+      type: "phase-boots-state",
+      id: player.id,
+      active: true,
+      endsAt: player.phaseBootsEndsAt,
+      cooldownUntil: player.phaseBootsCooldownUntil,
+    });
+  }
+
+  expirePhaseBoots(player, now = Date.now()) {
+    if (!player.phaseBootsActive || now < (player.phaseBootsEndsAt || 0)) return false;
+    player.phaseBootsActive = false;
+    player.phaseBootsEndsAt = 0;
+    if (!player.phaseBootsCooldownUntil || player.phaseBootsCooldownUntil < now) player.phaseBootsCooldownUntil = now + PHASE_BOOTS_COOLDOWN;
+    this.savePlayer(player.socket, player);
+    this.broadcastToMap(player.map, {
+      type: "phase-boots-state",
+      id: player.id,
+      active: false,
+      endsAt: 0,
+      cooldownUntil: player.phaseBootsCooldownUntil,
+    });
+    return true;
   }
 
   handleRobotShieldToggle(player) {
