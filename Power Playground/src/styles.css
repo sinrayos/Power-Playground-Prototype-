@@ -27,6 +27,15 @@
       width: 100vw;
       height: 100vh;
       cursor: default;
+      touch-action: none;
+    }
+
+    html,
+    body,
+    .mobileControls,
+    .mobileControls * {
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
     #startOverlay {
@@ -889,6 +898,118 @@
     .usernamePanel button { width: 100%; margin-top: 10px; padding: 13px; border: 0; border-radius: 10px; background: #2563eb; color: white; font-weight: 900; cursor: pointer; }
     .usernamePanel small { display: block; margin-top: 9px; color: #94a3b8; text-align: center; }
 
+    .mobileControls {
+      position: fixed;
+      inset: 0;
+      z-index: 35;
+      display: none;
+      pointer-events: none;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .mobileControls.visible {
+      display: block;
+    }
+
+    .mobileLookZone {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 58vw;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    .mobileJoystick {
+      position: absolute;
+      left: max(18px, env(safe-area-inset-left));
+      bottom: max(24px, env(safe-area-inset-bottom));
+      width: clamp(108px, 22vw, 154px);
+      height: clamp(108px, 22vw, 154px);
+      border: 2px solid rgba(255, 255, 255, 0.64);
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.28);
+      box-shadow: inset 0 0 28px rgba(15, 23, 42, 0.2), 0 12px 30px rgba(15, 23, 42, 0.14);
+      backdrop-filter: blur(8px);
+      pointer-events: auto;
+      touch-action: none;
+    }
+
+    .mobileJoystick span {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 45%;
+      height: 45%;
+      transform: translate(-50%, -50%);
+      border: 2px solid rgba(255, 255, 255, 0.82);
+      border-radius: 50%;
+      background: rgba(37, 99, 235, 0.78);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24);
+    }
+
+    .mobileActions {
+      position: absolute;
+      right: max(14px, env(safe-area-inset-right));
+      bottom: max(18px, env(safe-area-inset-bottom));
+      display: grid;
+      grid-template-columns: repeat(3, clamp(54px, 11vw, 72px));
+      grid-auto-rows: clamp(52px, 10.5vw, 70px);
+      gap: 9px;
+      align-items: end;
+      pointer-events: auto;
+    }
+
+    .mobileButton {
+      min-width: 52px;
+      min-height: 52px;
+      padding: 0 7px;
+      border: 2px solid rgba(255, 255, 255, 0.72);
+      border-radius: 14px;
+      background: rgba(15, 23, 42, 0.66);
+      color: #ffffff;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+      backdrop-filter: blur(8px);
+      font: 900 clamp(10px, 2.3vw, 13px)/1.05 system-ui, sans-serif;
+      text-align: center;
+      text-transform: uppercase;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .mobileButton.primary {
+      background: rgba(37, 99, 235, 0.78);
+    }
+
+    .mobileButton.utility {
+      min-height: 46px;
+      border-radius: 11px;
+      background: rgba(248, 250, 252, 0.84);
+      color: #0f172a;
+      font-size: clamp(9px, 2vw, 11px);
+    }
+
+    .mobileButton.pressed {
+      transform: translateY(1px) scale(0.96);
+      filter: brightness(1.18);
+    }
+
+    .mobileButton.cooling {
+      opacity: 0.62;
+    }
+
+    .mobileControls:not(.visible) .mobileLookZone,
+    .mobileControls:not(.visible) .mobileJoystick,
+    .mobileControls:not(.visible) .mobileActions {
+      pointer-events: none;
+    }
+
+    body.mobile-touch-active {
+      touch-action: none;
+    }
+
     @media (max-width: 980px) {
       #startOverlay { align-items: start; overflow-y: auto; }
       .menu { max-height: none; }
@@ -924,4 +1045,59 @@
       .mapPicker { grid-template-columns: 1fr; }
       .mapButton { min-height: 122px; }
       .iconPicker { grid-template-columns: repeat(4, minmax(42px, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      #hud {
+        left: 10px;
+        top: 10px;
+        max-width: min(330px, calc(100vw - 20px));
+      }
+
+      #powerHelp {
+        display: none;
+      }
+
+      #inventoryHud {
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: 50%;
+        width: min(290px, 46vw);
+        transform: translateX(-50%);
+      }
+
+      .bottomHealth {
+        width: 100%;
+        margin-bottom: 5px;
+      }
+
+      #hotbar {
+        display: none;
+      }
+
+      #multiplayerStatus {
+        top: auto;
+        right: max(12px, env(safe-area-inset-right));
+        bottom: calc(max(18px, env(safe-area-inset-bottom)) + 178px);
+      }
+
+      #fpsCounter {
+        top: auto;
+        bottom: calc(max(18px, env(safe-area-inset-bottom)) + 178px);
+      }
+    }
+
+    @media (max-width: 760px) and (orientation: portrait) {
+      .mobileLookZone {
+        width: 100vw;
+        height: 62vh;
+        bottom: auto;
+      }
+
+      .mobileActions {
+        grid-template-columns: repeat(2, clamp(54px, 15vw, 66px));
+      }
+
+      #inventoryHud {
+        width: min(250px, 38vw);
+      }
     }

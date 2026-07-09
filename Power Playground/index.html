@@ -200,6 +200,20 @@
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
   <div id="multiplayerStatus" hidden><span></span><strong>Online</strong><b id="activeRoomCode"></b></div>
+  <div id="mobileControls" class="mobileControls" aria-hidden="true">
+    <div id="mobileLookZone" class="mobileLookZone"></div>
+    <div id="mobileJoystick" class="mobileJoystick" aria-label="Move">
+      <span></span>
+    </div>
+    <div class="mobileActions" aria-label="Touch controls">
+      <button id="mobilePauseButton" class="mobileButton utility" type="button" data-control="pause">Menu</button>
+      <button id="mobileViewButton" class="mobileButton utility" type="button" data-control="view">View</button>
+      <button id="mobileSprintButton" class="mobileButton" type="button" data-control="sprint">Sprint</button>
+      <button id="mobileSecondaryButton" class="mobileButton" type="button" data-control="secondary">E</button>
+      <button id="mobileJumpButton" class="mobileButton primary" type="button" data-control="jump">Jump</button>
+      <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
+    </div>
+  </div>
   <script type="module" src="./src/main.js?v=20260708-pvp-hold-fix"></script>
 </body>
 </html>

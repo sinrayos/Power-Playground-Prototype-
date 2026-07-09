@@ -3,7 +3,7 @@ const ROOM_PATTERN = /^[A-Z0-9]{4,8}$/;
 const ATTACKS = {
   speed: { damage: 7, range: 3.8, knockback: 3.4, cone: -0.2, cooldown: 500 },
   strength: { damage: 20, range: 8, knockback: 7, radial: true, cooldown: 3400 },
-  teleport: { damage: 6, range: 18, knockback: 2.5, cone: 0.1, cooldown: 600 },
+  teleport: { damage: 6, range: 18, knockback: 2.5, cone: 0.1, cooldown: 1000 },
   telekinesis: { damage: 11, range: 15, knockback: 5, cone: 0.15, cooldown: 500 },
   flight: { damage: 15, range: 9, knockback: 6, radial: true, cooldown: 500 },
   robot: { damage: 8, range: 55, knockback: 2.4, cone: 0.9, cooldown: 850 },
@@ -583,7 +583,10 @@ export class GameRoom {
     const result = this.webTarget(attacker, action.targetId, 52, { ...action, mode: "pull" });
     if (!result) return;
     const now = Date.now();
-    if (now - (attacker.lastWebPullAt || 0) < WEB_PULL_COOLDOWN) return;
+    if (now - (attacker.lastWebPullAt || 0) < WEB_PULL_COOLDOWN) {
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "web-pull", cooldownUntil: (attacker.lastWebPullAt || 0) + WEB_PULL_COOLDOWN });
+      return;
+    }
     attacker.lastWebPullAt = now;
     this.savePlayer(attacker.socket, attacker);
     if (this.blockDamage(attacker, result.target, "webs")) return;

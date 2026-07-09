@@ -59,6 +59,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let frontViewMode = false;
     let rightMouseDragging = false;
     let shiftLockMode = false;
+    let mobileControlsActive = false;
+    let mobileLookPointerId = null;
+    let mobileLookLastX = 0;
+    let mobileLookLastY = 0;
+    let mobileJumpMashTimer = 0;
+    let lastMobileLabelPower = null;
     let robotShieldMode = false;
     let robotThrusterTimer = 0;
     let lastRobotThrusterSfx = 0;
@@ -78,6 +84,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let kickComboSide = 1;
     let pinnedKickDummy = null;
     let teleportPunchUntil = 0;
+    let teleportPunchCooldownUntil = 0;
     let teleportMovePoseUntil = 0;
     let teleportBackstabUntil = 0;
     let teleportBackstabYaw = 0;
@@ -247,6 +254,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const menuIconPicker = document.getElementById("menuIconPicker");
     const mapSwapSelect = document.getElementById("mapSwapSelect");
     const swapMapButton = document.getElementById("swapMapButton");
+    const mobileControls = document.getElementById("mobileControls");
+    const mobileJoystick = document.getElementById("mobileJoystick");
+    const mobileJoystickThumb = mobileJoystick?.querySelector("span");
+    const mobileLookZone = document.getElementById("mobileLookZone");
+    const mobilePauseButton = document.getElementById("mobilePauseButton");
+    const mobileViewButton = document.getElementById("mobileViewButton");
+    const mobileSprintButton = document.getElementById("mobileSprintButton");
+    const mobileSecondaryButton = document.getElementById("mobileSecondaryButton");
+    const mobileJumpButton = document.getElementById("mobileJumpButton");
+    const mobileAttackButton = document.getElementById("mobileAttackButton");
 
     const PLAYER_ICON_POWERS = ["speed", "strength", "teleport", "telekinesis", "flight", "jump", "robot", "webs"];
     const PLAYER_ICON_IDS = PLAYER_ICON_POWERS.flatMap((power) => [`portrait-${power}`, `symbol-${power}`]);
@@ -2637,6 +2654,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       }
       if (packet.ability === "telekinesis-grab") telekinesisGrabCooldownUntil = Math.max(telekinesisGrabCooldownUntil, until);
       if (packet.ability === "web-trap") webTrapCooldownUntil = Math.max(webTrapCooldownUntil, until);
+      if (packet.ability === "web-pull") {
+        webPullCooldownUntil = Math.max(webPullCooldownUntil, until);
+        showMessage(`Web pull ready in ${Math.max(0.1, (webPullCooldownUntil - performance.now()) / 1000).toFixed(1)}s`, 700);
+      }
       if (packet.ability === "flight-strike") {
         flightStrikeCooldownUntil = Math.max(flightStrikeCooldownUntil, until);
         if (flightStrikeState?.optimistic && flightStrikeState.phase !== "descending") {
@@ -2655,6 +2676,19 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           webPullState = { targetPlayer: remote, startedAt: performance.now(), duration: Math.max(1, endsAt - performance.now()) };
           webPullCooldownUntil = networkTimeToPerformance(packet.cooldownUntil);
           webShootPoseUntil = endsAt;
+          playSfx("webPull");
+          showMessage("Web pull latched", 650);
+        }
+      } else {
+        const attacker = remotePlayers.get(packet.attackerId);
+        const remoteTarget = remotePlayers.get(packet.targetId);
+        const targetPosition = packet.targetId === multiplayerClient?.id
+          ? threeFromCannon(playerBody.position).add(new THREE.Vector3(0, 0.82, 0))
+          : remoteTarget?.group.position.clone().add(new THREE.Vector3(0, 0.82, 0));
+        if (attacker && targetPosition) {
+          const start = attacker.parts?.rightHand?.getWorldPosition?.(new THREE.Vector3()) || attacker.group.position.clone().add(new THREE.Vector3(0.35, 0.95, 0));
+          attacker.web = { start: start.toArray(), end: targetPosition.toArray(), sag: 0.06 };
+          playSfx("webPull");
         }
       }
       if (packet.targetId === multiplayerClient?.id) {
@@ -2671,6 +2705,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         webPullTargetPlayer = null;
         if (webPullState?.targetPlayer) webPullState = null;
         if (webCord) webCord.group.visible = false;
+      }
+      const attacker = remotePlayers.get(packet.attackerId);
+      if (attacker?.webCord) {
+        attacker.web = null;
+        attacker.webCord.group.visible = false;
       }
       if (packet.targetId === multiplayerClient?.id) {
         webPulledById = null;
@@ -3696,7 +3735,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function beginSpiderSwing() {
-      if (selectedPower !== "webs" || isGrounded()) return false;
+      if (selectedPower !== "webs") return false;
       const now = performance.now();
       if (now < webSwingCooldownUntil) {
         showMessage(`Web Line ready in ${((webSwingCooldownUntil - now) / 1000).toFixed(1)}s`, 550);
@@ -3728,12 +3767,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (tangent.lengthSq() < 0.01) tangent.copy(getCameraRight());
       tangent.normalize();
       const horizontalSpeed = Math.hypot(playerBody.velocity.x, playerBody.velocity.z);
-      const kick = THREE.MathUtils.clamp(9.5 - horizontalSpeed * 0.35, 4.8, 9.5);
+      const kick = THREE.MathUtils.clamp((citySwing ? 13.2 : 11.2) - horizontalSpeed * 0.18, citySwing ? 7.2 : 6.4, citySwing ? 13.2 : 11.2);
+      const upwardLift = citySwing ? 9.2 : 7.8;
+      const forwardCarry = forward.clone().multiplyScalar(citySwing ? 3.8 : 2.8);
       playerBody.velocity.x += tangent.x * kick;
       playerBody.velocity.z += tangent.z * kick;
-      playerBody.velocity.y = Math.max(playerBody.velocity.y, 2.2);
+      playerBody.velocity.x += forwardCarry.x;
+      playerBody.velocity.z += forwardCarry.z;
+      playerBody.velocity.y = Math.max(playerBody.velocity.y + upwardLift, upwardLift);
       playSfx("webSwingShoot");
-      showMessage("Web Line attached — swing momentum!", 900);
+      showMessage("Web Line launch!", 900);
       return true;
     }
 
@@ -3851,8 +3894,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function beginSpiderPullOrZip() {
       if (selectedPower !== "webs") return;
       const now = performance.now();
-      if (now < webPullCooldownUntil || webSwingActive) return;
-      webPullCooldownUntil = now + 1000;
+      if (now < webPullCooldownUntil) {
+        playSfx("cooldownDeny");
+        showMessage(`Web pull ready in ${((webPullCooldownUntil - now) / 1000).toFixed(1)}s`, 650);
+        return;
+      }
+      if (webSwingActive) {
+        playSfx("cooldownDeny");
+        showMessage("Release the web swing before pulling", 650);
+        return;
+      }
       webShootPoseUntil = now + 520;
       raycaster.setFromCamera(mouseNdc, camera);
       raycaster.far = 52;
@@ -3878,6 +3929,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         const playerPos = threeFromCannon(playerBody.position);
         const remoteCenter = remoteHit.remote.group.position.clone().add(new THREE.Vector3(0, 0.82, 0));
         const serverAlong = Math.max(0, remoteCenter.sub(playerPos).dot(direction));
+        webPullCooldownUntil = now + 1000;
         multiplayerClient?.sendAction({
           kind: "web-pull-player",
           targetId: remoteHit.remote.id,
@@ -3895,6 +3947,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         const dummy = worldHit.target.userData.dummy;
         if (dummy && !dummy.isDefeated) {
           const playerPos = threeFromCannon(playerBody.position);
+          webPullCooldownUntil = now + 1000;
           dummy.webTrappedUntil = 0;
           if (dummy.webWrap) disposeVisual(dummy.webWrap);
           dummy.webWrap = null;
@@ -3910,6 +3963,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
       }
       if (["obstacle", "movableBox", "roof"].includes(hitType)) {
+        webPullCooldownUntil = now + 1000;
         const normal = new THREE.Vector3(0, 1, 0);
         if (worldHit.face) normal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld);
         const destination = clampPointToMap(worldHit.point.clone().addScaledVector(normal, 0.72));
@@ -4552,7 +4606,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function teleportPunchReset() {
-      if (!canUseAbility(620)) return false;
+      const now = performance.now();
+      if (now < teleportPunchCooldownUntil) {
+        showMessage(`TP Punch cooling down: ${((teleportPunchCooldownUntil - now) / 1000).toFixed(1)}s`);
+        playSfx("cooldownDeny");
+        return false;
+      }
       const startPos = threeFromCannon(playerBody.position);
       const forward = getCameraForward(true);
       const targetDummy = findTeleportPunchTarget(startPos, forward);
@@ -4574,7 +4633,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       spawnBeam(startPos.clone().add(new THREE.Vector3(0, 0.45, 0)), dummyPos.clone().add(new THREE.Vector3(0, 0.85, 0)), POWER_DATA.teleport.color, 0.055, 0.18);
       playerBody.position.set(strikePos.x, strikePos.y, strikePos.z);
       playerBody.velocity.set(0, 0, 0);
-      teleportPunchUntil = performance.now() + 360;
+      teleportPunchCooldownUntil = now + 1000;
+      teleportPunchUntil = now + 360;
       abilityPose = 1;
       playSfx("teleportPunch");
 
@@ -6641,6 +6701,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       } else if (selectedPower !== "strength") {
         chargeFill.style.width = "0%";
       }
+      updateMobileButtonLabels(true);
     }
 
     function updateFpsCounter(now) {
@@ -6792,6 +6853,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       lastSprintTrailPosition.copy(map.spawn);
       kickComboUntil = 0;
       teleportPunchUntil = 0;
+      teleportPunchCooldownUntil = 0;
       teleportMovePoseUntil = 0;
       teleportBackstabUntil = 0;
       teleportBackstabYaw = map.yaw;
@@ -6818,6 +6880,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       showMessage("Aim with the cursor. Hold right click and drag to move the camera.", 2400);
       playerBody.wakeUp();
       renderer.domElement.focus();
+      if (isLikelyMobileDevice()) revealMobileControls();
       if (multiplayerClient?.socket?.readyState === WebSocket.OPEN) {
         multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, username: localUsername, icon: localPlayerIcon });
       }
@@ -6827,6 +6890,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function releaseActiveInputs() {
       keys.clear();
+      window.clearInterval(mobileJumpMashTimer);
+      mobileJumpMashTimer = 0;
+      resetMobileJoystick();
+      [mobileSprintButton, mobileJumpButton, mobileAttackButton, mobileSecondaryButton, mobileViewButton, mobilePauseButton].forEach((button) => setMobileButtonPressed(button, false));
+      mobileLookPointerId = null;
       isPointerDown = false;
       primaryAttackArmed = false;
       megaLeapCharging = false;
@@ -7096,6 +7164,246 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       setMenuStep("mode");
     });
 
+    function revealMobileControls() {
+      if (!mobileControls || mobileControlsActive) return;
+      if (!gameStarted) return;
+      if (!isLikelyMobileDevice()) return;
+      mobileControlsActive = true;
+      mobileControls.classList.add("visible");
+      mobileControls.setAttribute("aria-hidden", "false");
+      document.body.classList.add("mobile-touch-active");
+      mouseNdc.set(0, 0);
+      updateMobileButtonLabels(true);
+    }
+
+    function isTouchLikePointer(event) {
+      return event.pointerType === "touch" || event.pointerType === "pen";
+    }
+
+    function isLikelyMobileDevice() {
+      if (navigator.userAgentData?.mobile) return true;
+      const ua = navigator.userAgent || "";
+      if (/Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(ua)) return true;
+      const iPadDesktopMode = /Macintosh/i.test(navigator.platform || "") && navigator.maxTouchPoints > 1;
+      const coarseTouch = navigator.maxTouchPoints > 0 && window.matchMedia?.("(pointer: coarse)")?.matches;
+      const compactTouchViewport = Math.min(window.innerWidth, window.innerHeight) <= 920 && Math.max(window.innerWidth, window.innerHeight) <= 1368;
+      return Boolean(iPadDesktopMode || (coarseTouch && compactTouchViewport));
+    }
+
+    function setMobileKey(code, active) {
+      if (active) keys.add(code);
+      else keys.delete(code);
+    }
+
+    function updateMobileButtonLabels(force = false) {
+      if (!mobileControls || (!mobileControlsActive && !force)) return;
+      if (!force && selectedPower === lastMobileLabelPower) return;
+      lastMobileLabelPower = selectedPower;
+      const labels = {
+        speed: { jump: "Jump", sprint: "Sprint", attack: "Kick", secondary: "Item", view: "View" },
+        strength: { jump: "Jump", sprint: "Run", attack: "Charge", secondary: "Grab", view: "View" },
+        teleport: { jump: "Jump", sprint: "Run", attack: "Punch", secondary: "Blink", view: "View" },
+        telekinesis: { jump: "Jump", sprint: "Run", attack: "Hold", secondary: "Focus", view: "View" },
+        flight: { jump: flightMode ? "Fly" : "Jump/Fly", sprint: flightMode ? "Turbo" : "Charge", attack: flightMode ? "Dive" : "Feathers", secondary: "Aerial", view: "View" },
+        robot: { jump: "Lift", sprint: "Thrust", attack: "Beam", secondary: "Shield", view: "View" },
+        jump: { jump: "Jump", sprint: "Run", attack: "Mega", secondary: "Skill", view: "View" },
+        webs: { jump: webSwingActive ? "Release" : "Swing", sprint: "Run", attack: "Punch/Pull", secondary: "Net", view: "Lock" },
+      }[selectedPower] || { jump: "Jump", sprint: "Sprint", attack: "Attack", secondary: "E", view: "View" };
+
+      if (mobileJumpButton) mobileJumpButton.textContent = labels.jump;
+      if (mobileSprintButton) mobileSprintButton.textContent = labels.sprint;
+      if (mobileAttackButton) mobileAttackButton.textContent = labels.attack;
+      if (mobileSecondaryButton) mobileSecondaryButton.textContent = labels.secondary;
+      if (mobileViewButton) mobileViewButton.textContent = labels.view;
+    }
+
+    function setMobileButtonPressed(button, pressed) {
+      button?.classList.toggle("pressed", Boolean(pressed));
+    }
+
+    function resetMobileJoystick() {
+      ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].forEach((code) => keys.delete(code));
+      if (mobileJoystickThumb) mobileJoystickThumb.style.transform = "translate(-50%, -50%)";
+    }
+
+    function updateMobileJoystickFromPointer(event) {
+      if (!mobileJoystick || !mobileJoystickThumb) return;
+      const rect = mobileJoystick.getBoundingClientRect();
+      const centerX = rect.left + rect.width * 0.5;
+      const centerY = rect.top + rect.height * 0.5;
+      const maxRadius = Math.max(1, rect.width * 0.38);
+      const deadZone = rect.width * 0.11;
+      let dx = event.clientX - centerX;
+      let dy = event.clientY - centerY;
+      const length = Math.hypot(dx, dy);
+      const scale = length > maxRadius ? maxRadius / length : 1;
+      dx *= scale;
+      dy *= scale;
+      mobileJoystickThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+      const active = length > deadZone;
+      const x = active ? dx / maxRadius : 0;
+      const y = active ? dy / maxRadius : 0;
+      setMobileKey("KeyW", y < -0.32);
+      setMobileKey("KeyS", y > 0.32);
+      setMobileKey("KeyA", x < -0.32);
+      setMobileKey("KeyD", x > 0.32);
+    }
+
+    function handleMobileJumpDown() {
+      if (!gameStarted) return;
+      if (grabbedById) {
+        handleHoldEscapeTap();
+        window.clearInterval(mobileJumpMashTimer);
+        mobileJumpMashTimer = window.setInterval(() => {
+          if (grabbedById) handleHoldEscapeTap();
+        }, 145);
+        return;
+      }
+      setMobileKey("Space", true);
+      if (selectedPower === "webs") {
+        if (webWallWalkActive) jumpOffSpiderWall();
+        else beginSpiderSwing();
+      }
+      if (selectedPower === "flight") {
+        if (isGrounded()) flightJumpArmed = flyMeterCharge >= 0.999;
+        else if (!flightMode) toggleFlight();
+      }
+    }
+
+    function handleMobileJumpUp() {
+      window.clearInterval(mobileJumpMashTimer);
+      mobileJumpMashTimer = 0;
+      setMobileKey("Space", false);
+      if (selectedPower === "webs") endSpiderSwing();
+    }
+
+    function cycleCameraView() {
+      if (!gameStarted) return;
+      if (!firstPersonMode && !frontViewMode) firstPersonMode = true;
+      else if (firstPersonMode) {
+        firstPersonMode = false;
+        frontViewMode = true;
+        cameraYaw = playerGroup.rotation.y;
+        cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.18, 0.36);
+      } else {
+        frontViewMode = false;
+      }
+      showMessage(firstPersonMode ? "First person view" : frontViewMode ? "Front view" : "Third person view", 900);
+    }
+
+    function updateTouchAim(clientX, clientY) {
+      if (shiftLockMode) mouseNdc.set(0, 0);
+      else {
+        mouseNdc.x = (clientX / window.innerWidth) * 2 - 1;
+        mouseNdc.y = -(clientY / window.innerHeight) * 2 + 1;
+      }
+    }
+
+    function bindMobileHoldButton(button, onDown, onUp) {
+      if (!button) return;
+      button.addEventListener("pointerdown", (event) => {
+        if (!isTouchLikePointer(event)) return;
+        revealMobileControls();
+        event.preventDefault();
+        event.stopPropagation();
+        button.setPointerCapture?.(event.pointerId);
+        setMobileButtonPressed(button, true);
+        onDown(event);
+      });
+      const release = (event) => {
+        if (!isTouchLikePointer(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setMobileButtonPressed(button, false);
+        onUp(event);
+      };
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", () => setMobileButtonPressed(button, false));
+    }
+
+    function initializeMobileControls() {
+      if (!mobileControls) return;
+      window.addEventListener("pointerdown", (event) => {
+        if (isTouchLikePointer(event)) revealMobileControls();
+      }, { passive: true });
+
+      mobileJoystick?.addEventListener("pointerdown", (event) => {
+        if (!isTouchLikePointer(event)) return;
+        revealMobileControls();
+        event.preventDefault();
+        event.stopPropagation();
+        mobileJoystick.setPointerCapture?.(event.pointerId);
+        updateMobileJoystickFromPointer(event);
+      });
+      mobileJoystick?.addEventListener("pointermove", (event) => {
+        if (!isTouchLikePointer(event) || !mobileJoystick.hasPointerCapture?.(event.pointerId)) return;
+        event.preventDefault();
+        updateMobileJoystickFromPointer(event);
+      });
+      const stopJoystick = (event) => {
+        if (!isTouchLikePointer(event)) return;
+        event.preventDefault();
+        resetMobileJoystick();
+      };
+      mobileJoystick?.addEventListener("pointerup", stopJoystick);
+      mobileJoystick?.addEventListener("pointercancel", stopJoystick);
+
+      mobileLookZone?.addEventListener("pointerdown", (event) => {
+        if (!isTouchLikePointer(event)) return;
+        revealMobileControls();
+        event.preventDefault();
+        event.stopPropagation();
+        mobileLookPointerId = event.pointerId;
+        mobileLookLastX = event.clientX;
+        mobileLookLastY = event.clientY;
+        mobileLookZone.setPointerCapture?.(event.pointerId);
+        updateTouchAim(event.clientX, event.clientY);
+        if (flightStrikeState?.phase === "targeting") chooseFlightStrikeTarget();
+      });
+      mobileLookZone?.addEventListener("pointermove", (event) => {
+        if (!isTouchLikePointer(event) || event.pointerId !== mobileLookPointerId) return;
+        event.preventDefault();
+        const dx = event.clientX - mobileLookLastX;
+        const dy = event.clientY - mobileLookLastY;
+        mobileLookLastX = event.clientX;
+        mobileLookLastY = event.clientY;
+        updateTouchAim(event.clientX, event.clientY);
+        if (!gameStarted || gamePaused || localDefeat || flightStrikeState?.phase === "targeting") return;
+        cameraYaw -= dx * 0.0042;
+        cameraPitch -= dy * 0.0034;
+        cameraPitch = THREE.MathUtils.clamp(cameraPitch, selectedPower === "flight" && flightMode ? -0.72 : -0.48, selectedPower === "flight" && flightMode ? 0.88 : 0.82);
+      });
+      const stopLook = (event) => {
+        if (!isTouchLikePointer(event) || event.pointerId !== mobileLookPointerId) return;
+        mobileLookPointerId = null;
+      };
+      mobileLookZone?.addEventListener("pointerup", stopLook);
+      mobileLookZone?.addEventListener("pointercancel", stopLook);
+
+      bindMobileHoldButton(mobileSprintButton, () => setMobileKey("ShiftLeft", true), () => setMobileKey("ShiftLeft", false));
+      bindMobileHoldButton(mobileJumpButton, handleMobileJumpDown, handleMobileJumpUp);
+      bindMobileHoldButton(mobileAttackButton, () => {
+        if (flightStrikeState?.phase === "targeting") {
+          chooseFlightStrikeTarget();
+          return;
+        }
+        onAbilityDown();
+      }, onAbilityUp);
+      bindMobileHoldButton(mobileSecondaryButton, () => handleSecondaryAbilityKey(), () => {});
+      bindMobileHoldButton(mobileViewButton, () => {
+        if (selectedPower === "webs") toggleShiftLock();
+        else cycleCameraView();
+      }, () => {});
+      bindMobileHoldButton(mobilePauseButton, () => {
+        if (flightStrikeState) {
+          cancelFlightStrike(true);
+          showMessage("Aerial strike cancelled", 750);
+        } else setPaused(!gamePaused);
+      }, () => {});
+    }
+
     function isTextEntryTarget(target) {
       return target instanceof Element && Boolean(target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
     }
@@ -7126,6 +7434,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       broadcastSecondaryAbility();
       return true;
     }
+
+    initializeMobileControls();
 
     window.addEventListener("keydown", (event) => {
       if (isTextEntryTarget(event.target)) return;
@@ -7170,19 +7480,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         toggleShiftLock();
       }
       if (event.code === "KeyV" && !event.repeat && gameStarted) {
-        if (!firstPersonMode && !frontViewMode) firstPersonMode = true;
-        else if (firstPersonMode) {
-          firstPersonMode = false;
-          frontViewMode = true;
-          cameraYaw = playerGroup.rotation.y;
-          cameraPitch = THREE.MathUtils.clamp(cameraPitch, -0.18, 0.36);
-        }
-        else frontViewMode = false;
-        showMessage(firstPersonMode ? "First person view" : frontViewMode ? "Front view" : "Third person view", 900);
+        cycleCameraView();
       }
       if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "webs") {
         if (webWallWalkActive) jumpOffSpiderWall();
-        else if (!isGrounded() && !webSwingActive) beginSpiderSwing();
+        else if (!webSwingActive) beginSpiderSwing();
       }
       if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "flight") {
         if (isGrounded()) flightJumpArmed = flyMeterCharge >= 0.999;
