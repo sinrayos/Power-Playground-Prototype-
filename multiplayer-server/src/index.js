@@ -10,9 +10,13 @@ const ATTACKS = {
   jump: { damage: 17, range: 8, knockback: 6, radial: true, cooldown: 450 },
   webs: { damage: 10, range: 8, knockback: 3, cone: 0.05, cooldown: 650 },
 };
-const TELEKINESIS_GRAB_COOLDOWN = 1200;
+const TELEKINESIS_GRAB_COOLDOWN = 1500;
+const STRENGTH_PLAYER_GRAB_COOLDOWN = 1500;
 const ROBOT_SHIELD_DURATION = 5000;
 const ROBOT_SHIELD_COOLDOWN = 5000;
+const TELEPORT_BACKSTAB_COOLDOWN = 1500;
+const HOLD_ESCAPE_TAP_GAIN = 0.065;
+const HOLD_ESCAPE_DECAY_PER_SECOND = 0.12;
 const WEB_PULL_COOLDOWN = 1000;
 const WEB_TRAP_COOLDOWN = 5000;
 const PLAYER_ICON_PATTERN = /^(portrait|symbol)-(speed|strength|teleport|telekinesis|flight|jump|robot|webs)$/;
@@ -143,7 +147,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -215,6 +219,8 @@ export class GameRoom {
       if (player.grabbedBy && !holder) {
         player.grabbedBy = null;
         player.grabbedMode = null;
+        player.holdEscapeProgress = 0;
+        player.lastHoldEscapeTapAt = 0;
       }
       const reportedPosition = safeVector(message.state.position);
       const statePosition = player.webTrappedUntil > Date.now() && Array.isArray(player.webTrapAnchor)
@@ -243,6 +249,7 @@ export class GameRoom {
       if (action.kind === "telekinesis-entity-grab") return this.handleTelekinesisEntityGrab(player, action);
       if (action.kind === "telekinesis-throw-player") return this.handleTelekinesisThrow(player, action);
       if (action.kind === "telekinesis-slam-player") return this.handleTelekinesisSlam(player, action);
+      if (action.kind === "hold-escape-tap") return this.handleHoldEscapeTap(player);
       if (action.kind === "robot-shield-toggle") return this.handleRobotShieldToggle(player);
       if (action.kind === "web-pull-player") return this.handleWebPull(player, action);
       if (action.kind === "web-pull-release") return this.handleWebPullRelease(player, action);
@@ -288,7 +295,7 @@ export class GameRoom {
     if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return;
     if (attacker.grabbedBy || target.grabbedBy || !attacker.state?.position || !target.state?.position) return;
     const now = Date.now();
-    if (now - (attacker.lastGrabAt || 0) < 1200) return;
+    if (now - (attacker.lastGrabAt || 0) < STRENGTH_PLAYER_GRAB_COOLDOWN) return;
     const distance = Math.hypot(
       target.state.position[0] - attacker.state.position[0],
       target.state.position[1] - attacker.state.position[1],
@@ -299,8 +306,10 @@ export class GameRoom {
     this.savePlayer(attacker.socket, attacker);
     target.grabbedBy = attacker.id;
     target.grabbedMode = "strength";
+    target.holdEscapeProgress = 0;
+    target.lastHoldEscapeTapAt = 0;
     this.savePlayer(target.socket, target);
-    this.broadcast({ type: "player-grabbed", attackerId: attacker.id, targetId: target.id, mode: "strength" });
+    this.broadcast({ type: "player-grabbed", attackerId: attacker.id, targetId: target.id, mode: "strength", cooldownUntil: now + STRENGTH_PLAYER_GRAB_COOLDOWN });
   }
 
   handleStrengthThrow(attacker, action) {
@@ -311,6 +320,8 @@ export class GameRoom {
     const impulse = [(direction[0] / length) * 16, 1.5, (direction[2] / length) * 16];
     target.grabbedBy = null;
     target.grabbedMode = null;
+    target.holdEscapeProgress = 0;
+    target.lastHoldEscapeTapAt = 0;
     if (this.blockDamage(attacker, target, "strength")) {
       this.savePlayer(target.socket, target);
       this.broadcast({ type: "player-released", attackerId: attacker.id, targetId: target.id });
@@ -349,6 +360,8 @@ export class GameRoom {
     attacker.lastTelekinesisGrabAt = now;
     target.grabbedBy = attacker.id;
     target.grabbedMode = "telekinesis";
+    target.holdEscapeProgress = 0;
+    target.lastHoldEscapeTapAt = 0;
     this.savePlayer(attacker.socket, attacker);
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "player-grabbed", attackerId: attacker.id, targetId: target.id, mode: "telekinesis", cooldownUntil: now + TELEKINESIS_GRAB_COOLDOWN });
@@ -373,6 +386,8 @@ export class GameRoom {
     const impulse = [(direction[0] / length) * 13, Math.max(2.5, direction[1] * 8 + 3), (direction[2] / length) * 13];
     target.grabbedBy = null;
     target.grabbedMode = null;
+    target.holdEscapeProgress = 0;
+    target.lastHoldEscapeTapAt = 0;
     if (this.blockDamage(attacker, target, "telekinesis")) {
       this.savePlayer(target.socket, target);
       this.broadcast({ type: "player-released", attackerId: attacker.id, targetId: target.id });
@@ -398,10 +413,44 @@ export class GameRoom {
     if (target.health <= 0) {
       target.grabbedBy = null;
       target.grabbedMode = null;
+      target.holdEscapeProgress = 0;
+      target.lastHoldEscapeTapAt = 0;
     }
     this.savePlayer(target.socket, target);
     this.broadcast({ type: "pvp-hit", attackerId: holder.id, targetId: target.id, health: target.health, damage: 5, impulse: [0, 0, 0], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "telekinesis", slam: true, position: safeVector(action.position, target.state?.position || [0, 0, 0]) });
     if (target.health <= 0) this.announceDefeat(target, holder);
+  }
+
+  handleHoldEscapeTap(target) {
+    const now = Date.now();
+    if (!target.grabbedBy || !["strength", "telekinesis"].includes(target.grabbedMode) || target.health <= 0) return;
+    const holder = this.players.get(target.grabbedBy);
+    if (!holder || holder.map !== target.map || holder.health <= 0) {
+      target.grabbedBy = null;
+      target.grabbedMode = null;
+      target.holdEscapeProgress = 0;
+      target.lastHoldEscapeTapAt = 0;
+      this.savePlayer(target.socket, target);
+      this.broadcast({ type: "player-released", attackerId: holder?.id || null, targetId: target.id, escaped: true });
+      return;
+    }
+    if (now - (target.lastHoldEscapeTapAt || 0) < 75) return;
+    const elapsed = Math.max(0, now - (target.lastHoldEscapeTapAt || now)) / 1000;
+    target.holdEscapeProgress = Math.max(0, Number(target.holdEscapeProgress || 0) - elapsed * HOLD_ESCAPE_DECAY_PER_SECOND) + HOLD_ESCAPE_TAP_GAIN;
+    target.lastHoldEscapeTapAt = now;
+    if (target.holdEscapeProgress >= 1) {
+      const attackerId = target.grabbedBy;
+      target.grabbedBy = null;
+      target.grabbedMode = null;
+      target.holdEscapeProgress = 0;
+      target.lastHoldEscapeTapAt = 0;
+      this.savePlayer(target.socket, target);
+      this.broadcast({ type: "player-released", attackerId, targetId: target.id, escaped: true });
+      return;
+    }
+    target.holdEscapeProgress = Math.min(0.99, target.holdEscapeProgress);
+    this.savePlayer(target.socket, target);
+    this.send(target.socket, { type: "hold-escape-progress", targetId: target.id, progress: target.holdEscapeProgress, mode: target.grabbedMode });
   }
 
   handleStrengthEntityThrow(attacker, action) {
@@ -471,11 +520,20 @@ export class GameRoom {
     if (!target || target.id === attacker.id || attacker.power !== "teleport" || attacker.map !== "pvpArena") return;
     if (target.map !== attacker.map || attacker.grabbedBy || attacker.health <= 0 || target.health <= 0 || !attacker.state?.position || !target.state?.position) return;
     const now = Date.now();
-    if (now - (attacker.lastBackstabAt || 0) < 1000) return;
+    if (now - (attacker.lastBackstabAt || 0) < TELEPORT_BACKSTAB_COOLDOWN) return;
     const dx = target.state.position[0] - attacker.state.position[0];
+    const dy = target.state.position[1] - attacker.state.position[1];
     const dz = target.state.position[2] - attacker.state.position[2];
     const distance = Math.hypot(dx, dz);
     if (distance > 58) return;
+    const forward = Array.isArray(attacker.state.forward) ? attacker.state.forward : [0, 0, -1];
+    const forwardLength = Math.hypot(...forward) || 1;
+    const fx = forward[0] / forwardLength;
+    const fy = forward[1] / forwardLength;
+    const fz = forward[2] / forwardLength;
+    const along = dx * fx + dy * fy + dz * fz;
+    const miss = Math.hypot(dx - fx * along, dy - fy * along, dz - fz * along);
+    if (along < 0 || along > 58 || miss > 1.25) return;
     attacker.lastBackstabAt = now;
     this.savePlayer(attacker.socket, attacker);
     if (this.blockDamage(attacker, target, "teleport")) return;
@@ -655,12 +713,16 @@ export class GameRoom {
       const dx = target.state.position[0] - point[0];
       const dz = target.state.position[2] - point[2];
       const distance = Math.hypot(dx, dz);
-      if (distance > 7.5 || this.blockDamage(player, target, "flight")) continue;
-      const scale = Math.max(0.25, 1 - distance / 9);
-      target.health = Math.max(0, target.health - Math.round(24 * scale));
+      if (distance > 10.5 || this.blockDamage(player, target, "flight")) continue;
+      const scale = Math.max(0.28, 1 - distance / 11);
+      const damage = Math.round(28 * scale);
+      target.health = Math.max(0, target.health - damage);
       target.respawnAt = target.health <= 0 ? now + DEFEAT_RESPAWN_DELAY : 0;
       this.savePlayer(target.socket, target);
-      this.broadcast({ type: "pvp-hit", attackerId: player.id, targetId: target.id, health: target.health, damage: Math.round(24 * scale), impulse: [(dx / Math.max(distance, 0.1)) * 8 * scale, 5 * scale, (dz / Math.max(distance, 0.1)) * 8 * scale], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "flight", position: point });
+      const safeDistance = distance > 0.1 ? distance : 1;
+      const dirX = distance > 0.1 ? dx / safeDistance : 0;
+      const dirZ = distance > 0.1 ? dz / safeDistance : 1;
+      this.broadcast({ type: "pvp-hit", attackerId: player.id, targetId: target.id, health: target.health, damage, impulse: [dirX * 12 * scale, 6.5 * scale, dirZ * 12 * scale], defeated: target.health <= 0, respawnAt: target.respawnAt, power: "flight", position: point });
       if (target.health <= 0) this.announceDefeat(target, player);
     }
   }
@@ -784,6 +846,8 @@ export class GameRoom {
       if (target.grabbedBy !== attackerId) continue;
       target.grabbedBy = null;
       target.grabbedMode = null;
+      target.holdEscapeProgress = 0;
+      target.lastHoldEscapeTapAt = 0;
       this.savePlayer(target.socket, target);
       this.broadcast({ type: "player-released", attackerId, targetId: target.id });
     }
@@ -817,6 +881,8 @@ export class GameRoom {
       if (target.health <= 0) {
         target.grabbedBy = null;
         target.grabbedMode = null;
+        target.holdEscapeProgress = 0;
+        target.lastHoldEscapeTapAt = 0;
       }
       this.savePlayer(target.socket, target);
       const hit = {
@@ -843,6 +909,8 @@ export class GameRoom {
     target.respawnAt = target.respawnAt || Date.now() + DEFEAT_RESPAWN_DELAY;
     target.grabbedBy = null;
     target.grabbedMode = null;
+    target.holdEscapeProgress = 0;
+    target.lastHoldEscapeTapAt = 0;
     target.shieldActive = false;
     target.shieldEndsAt = 0;
     target.flightStrike = null;

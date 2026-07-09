@@ -13,7 +13,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const tmpCannon = new CANNON.Vec3();
     const dummyMass = 3.4;
     const PLAYER_VISUAL_ROOT_OFFSET = 0.27;
-    const TELEKINESIS_GRAB_COOLDOWN = 1200;
+    const TELEKINESIS_GRAB_COOLDOWN = 1500;
+    const STRENGTH_PLAYER_GRAB_COOLDOWN = 1500;
     const ROBOT_SHOT_COOLDOWN = 850;
 
     let selectedPower = null;
@@ -36,6 +37,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let strengthThrowPoseUntil = 0;
     let strengthGrabCooldownUntil = 0;
     let grabbedById = null;
+    let holdEscapeProgress = 0;
+    let holdEscapeLastTapAt = 0;
+    let holdEscapePulseUntil = 0;
+    let pvpCombatUntil = 0;
     let playerForcedMotionUntil = 0;
     let playerTumbleUntil = 0;
     let flightMode = false;
@@ -196,6 +201,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const flyMeter = document.getElementById("flyMeter");
     const flyMeterFill = document.getElementById("flyMeterFill");
     const flyMeterState = document.getElementById("flyMeterState");
+    const holdEscapeMeter = document.getElementById("holdEscapeMeter");
+    const holdEscapeFill = document.getElementById("holdEscapeFill");
+    const holdEscapeState = document.getElementById("holdEscapeState");
     const inventoryHud = document.getElementById("inventoryHud");
     const pauseOverlay = document.getElementById("pauseOverlay");
     const resumeButton = document.getElementById("resumeButton");
@@ -2069,6 +2077,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         clearPlayerWebWrap();
         grabbedById = null;
         grabbedMode = null;
+        resetHoldEscape();
+        pvpCombatUntil = 0;
         playerBody.velocity.set(0, 0, 0);
         playerBody.angularVelocity.set(0, 0, 0);
         playerBody.sleep();
@@ -2335,6 +2345,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (packet.type === "player-grabbed") applyPlayerGrabbed(packet);
       if (packet.type === "player-thrown") withoutNetworkVisualRelay(() => applyPlayerThrown(packet));
       if (packet.type === "player-released") applyPlayerReleased(packet);
+      if (packet.type === "hold-escape-progress" && packet.targetId === multiplayerClient?.id) {
+        holdEscapeProgress = THREE.MathUtils.clamp(Number(packet.progress) || 0, 0, 1);
+        holdEscapePulseUntil = performance.now() + 160;
+      }
       if (packet.type === "shield-state") withoutNetworkVisualRelay(() => applyShieldState(packet));
       if (packet.type === "shield-blocked") withoutNetworkVisualRelay(() => applyShieldBlocked(packet));
       if (packet.type === "ability-cooldown") applyAbilityCooldown(packet);
@@ -2494,6 +2508,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function applyPvpHit(packet) {
       const color = POWER_DATA[packet.power]?.color || 0xef4444;
       if (packet.targetId === multiplayerClient?.id) {
+        markPvpCombat();
         playerHealth = packet.health;
         playerDamageFlash = 0.55;
         playerForcedMotionUntil = Math.max(playerForcedMotionUntil, performance.now() + 220);
@@ -2506,12 +2521,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playSfx(packet.slam ? "telekinesisThrow" : "playerHit");
         if (packet.slam && !packet.defeated) showMessage(`Telekinetic slam: ${packet.damage} damage`, 850);
         if (packet.defeated) {
-          grabbedById = null;
-          grabbedMode = null;
-          pvpRespawnAt = packet.respawnAt;
+        grabbedById = null;
+        grabbedMode = null;
+        resetHoldEscape();
+        pvpCombatUntil = 0;
+        pvpRespawnAt = packet.respawnAt;
           showMessage("Defeated — respawning…", 2400);
         }
       } else {
+        if (packet.attackerId === multiplayerClient?.id) markPvpCombat();
         if (packet.defeated && strengthHeldEnemy?.type === "player" && strengthHeldEnemy.id === packet.targetId) strengthHeldEnemy = null;
         if (packet.defeated && telekinesisHeldPlayer?.id === packet.targetId) telekinesisHeldPlayer = null;
         const remote = remotePlayers.get(packet.targetId);
@@ -2530,6 +2548,42 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function networkTimeToPerformance(serverTimestamp) {
       return performance.now() + Math.max(0, Number(serverTimestamp || 0) - Date.now());
+    }
+
+    function markPvpCombat(duration = 10000) {
+      if (!onlineMode || selectedMap !== "pvpArena") return;
+      pvpCombatUntil = Math.max(pvpCombatUntil, performance.now() + duration);
+    }
+
+    function pvpCombatSecondsRemaining() {
+      return Math.max(0, (pvpCombatUntil - performance.now()) / 1000);
+    }
+
+    function isPvpCombatLocked() {
+      return pvpCombatSecondsRemaining() > 0.05;
+    }
+
+    function showCombatLockedMessage() {
+      showMessage(`In PvP combat — wait ${Math.ceil(pvpCombatSecondsRemaining())}s`, 900);
+      playSfx("cooldownDeny");
+    }
+
+    function resetHoldEscape() {
+      holdEscapeProgress = 0;
+      holdEscapeLastTapAt = 0;
+      holdEscapePulseUntil = 0;
+    }
+
+    function handleHoldEscapeTap() {
+      if (!grabbedById || !["strength", "telekinesis"].includes(grabbedMode)) return false;
+      const now = performance.now();
+      if (now - holdEscapeLastTapAt < 80) return true;
+      holdEscapeProgress = THREE.MathUtils.clamp(holdEscapeProgress + 0.065, 0, 0.98);
+      holdEscapeLastTapAt = now;
+      holdEscapePulseUntil = now + 160;
+      multiplayerClient?.sendAction({ kind: "hold-escape-tap" });
+      showMessage(`Mash Space to escape — ${Math.round(holdEscapeProgress * 100)}%`, 360);
+      return true;
     }
 
     function applyShieldState(packet) {
@@ -2716,6 +2770,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (packet.id === multiplayerClient?.id) {
         grabbedById = null;
         grabbedMode = null;
+        resetHoldEscape();
         playerForcedMotionUntil = 0;
         playerTumbleUntil = 0;
         playerHealth = Number.isFinite(packet.health) ? packet.health : maxPlayerHealth();
@@ -2738,7 +2793,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const targetPlayer = roomPlayers.get(packet.targetId);
       if (targetPlayer) rememberRoomPlayer({ ...targetPlayer, grabbedBy: packet.attackerId, grabbedMode: packet.mode });
       if (packet.attackerId === multiplayerClient?.id) {
+        markPvpCombat();
         if (packet.mode === "telekinesis" && packet.cooldownUntil) telekinesisGrabCooldownUntil = networkTimeToPerformance(packet.cooldownUntil);
+        if (packet.mode === "strength" && packet.cooldownUntil) strengthGrabCooldownUntil = networkTimeToPerformance(packet.cooldownUntil);
         const remote = remotePlayers.get(packet.targetId);
         if (packet.mode === "telekinesis") {
           telekinesisHeldPlayer = remote;
@@ -2753,8 +2810,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
       }
       if (packet.targetId === multiplayerClient?.id) {
+        markPvpCombat();
         grabbedById = packet.attackerId;
         grabbedMode = packet.mode || "strength";
+        resetHoldEscape();
         keys.clear();
         isPointerDown = false;
         playerBody.velocity.set(0, 0, 0);
@@ -2767,6 +2826,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const targetPlayer = roomPlayers.get(packet.targetId);
       if (targetPlayer) rememberRoomPlayer({ ...targetPlayer, grabbedBy: null, health: packet.health });
       if (packet.attackerId === multiplayerClient?.id) {
+        markPvpCombat();
         if (packet.mode === "telekinesis") telekinesisHeldPlayer = null;
         else {
           if (strengthHeldEnemy?.type === "player" && strengthHeldEnemy.id === packet.targetId) strengthHeldEnemy = null;
@@ -2774,8 +2834,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
       }
       if (packet.targetId === multiplayerClient?.id) {
+        markPvpCombat();
         grabbedById = null;
         grabbedMode = null;
+        resetHoldEscape();
         playerHealth = packet.health;
         playerDamageFlash = 0.7;
         playerForcedMotionUntil = performance.now() + 800;
@@ -2804,11 +2866,23 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const targetPlayer = roomPlayers.get(packet.targetId);
       if (targetPlayer) rememberRoomPlayer({ ...targetPlayer, grabbedBy: null });
       if (packet.targetId === multiplayerClient?.id) {
+        markPvpCombat();
         grabbedById = null;
         grabbedMode = null;
+        resetHoldEscape();
+        if (packet.escaped) {
+          playSfx("webSwingRelease");
+          showMessage("Escaped the hold!", 900);
+        }
       }
-      if (packet.attackerId === multiplayerClient?.id && strengthHeldEnemy?.type === "player" && strengthHeldEnemy.id === packet.targetId) strengthHeldEnemy = null;
-      if (packet.attackerId === multiplayerClient?.id && telekinesisHeldPlayer?.id === packet.targetId) telekinesisHeldPlayer = null;
+      if (packet.attackerId === multiplayerClient?.id && strengthHeldEnemy?.type === "player" && strengthHeldEnemy.id === packet.targetId) {
+        strengthHeldEnemy = null;
+        markPvpCombat();
+      }
+      if (packet.attackerId === multiplayerClient?.id && telekinesisHeldPlayer?.id === packet.targetId) {
+        telekinesisHeldPlayer = null;
+        markPvpCombat();
+      }
     }
 
     async function connectToMultiplayer(lobbyOnly = false) {
@@ -3649,8 +3723,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       webZipState = null;
       webWallLastContactAt = 0;
       playerBody.wakeUp();
+      const radial = playerPos.clone().sub(webSwingAnchor).normalize();
+      const tangent = forward.clone().sub(radial.clone().multiplyScalar(forward.dot(radial)));
+      if (tangent.lengthSq() < 0.01) tangent.copy(getCameraRight());
+      tangent.normalize();
+      const horizontalSpeed = Math.hypot(playerBody.velocity.x, playerBody.velocity.z);
+      const kick = THREE.MathUtils.clamp(9.5 - horizontalSpeed * 0.35, 4.8, 9.5);
+      playerBody.velocity.x += tangent.x * kick;
+      playerBody.velocity.z += tangent.z * kick;
+      playerBody.velocity.y = Math.max(playerBody.velocity.y, 2.2);
       playSfx("webSwingShoot");
-      showMessage("Web Line attached — momentum carries the swing", 900);
+      showMessage("Web Line attached — swing momentum!", 900);
       return true;
     }
 
@@ -3769,16 +3852,70 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (selectedPower !== "webs") return;
       const now = performance.now();
       if (now < webPullCooldownUntil || webSwingActive) return;
-      const zipHit = centerRaycast(52);
-      const zipType = zipHit?.target?.userData?.type;
-      if (["obstacle", "movableBox", "roof"].includes(zipType)) {
+      webPullCooldownUntil = now + 1000;
+      webShootPoseUntil = now + 520;
+      raycaster.setFromCamera(mouseNdc, camera);
+      raycaster.far = 52;
+      const aimOrigin = raycaster.ray.origin.clone();
+      const direction = raycaster.ray.direction.clone().normalize();
+      const worldHit = raycaster.intersectObjects(raycastTargets, true)
+        .map((hit) => ({ ...hit, target: resolveTarget(hit.object) }))
+        .find((hit) => hit.target && hit.target !== playerGroup && hit.target.visible !== false);
+      let remoteHit = null;
+      if (selectedMap === "pvpArena") {
+        remotePlayers.forEach((remote) => {
+          if (remote.health <= 0 || !remote.group.visible) return;
+          const center = remote.group.position.clone().add(new THREE.Vector3(0, 0.82, 0));
+          const offset = center.clone().sub(aimOrigin);
+          const along = offset.dot(direction);
+          if (along < 0 || along > 52 || (worldHit && along >= worldHit.distance)) return;
+          const miss = offset.addScaledVector(direction, -along).length();
+          if (miss > 0.84 || (remoteHit && along >= remoteHit.distance)) return;
+          remoteHit = { remote, distance: along, point: aimOrigin.clone().addScaledVector(direction, along) };
+        });
+      }
+      if (remoteHit) {
+        const playerPos = threeFromCannon(playerBody.position);
+        const remoteCenter = remoteHit.remote.group.position.clone().add(new THREE.Vector3(0, 0.82, 0));
+        const serverAlong = Math.max(0, remoteCenter.sub(playerPos).dot(direction));
+        multiplayerClient?.sendAction({
+          kind: "web-pull-player",
+          targetId: remoteHit.remote.id,
+          origin: playerPos.toArray(),
+          direction: direction.toArray(),
+          hitPoint: remoteHit.point.toArray(),
+          flightMs: serverAlong / 48 * 1000,
+        });
+        playSfx("webSwingShoot");
+        showMessage("Web pull hit", 650);
+        return;
+      }
+      const hitType = worldHit?.target?.userData?.type;
+      if (hitType === "dummy") {
+        const dummy = worldHit.target.userData.dummy;
+        if (dummy && !dummy.isDefeated) {
+          const playerPos = threeFromCannon(playerBody.position);
+          dummy.webTrappedUntil = 0;
+          if (dummy.webWrap) disposeVisual(dummy.webWrap);
+          dummy.webWrap = null;
+          webPullState = {
+            target: dummy,
+            start: threeFromCannon(dummy.body.position),
+            startedAt: now,
+            duration: THREE.MathUtils.clamp(threeFromCannon(dummy.body.position).distanceTo(playerPos) * 34, 520, 1150)
+          };
+          playSfx("webPull");
+          showMessage(`${dummy.label || "Enemy"} web-pulled`, 750);
+          return;
+        }
+      }
+      if (["obstacle", "movableBox", "roof"].includes(hitType)) {
         const normal = new THREE.Vector3(0, 1, 0);
-        if (zipHit.face) normal.copy(zipHit.face.normal).transformDirection(zipHit.object.matrixWorld);
-        const destination = clampPointToMap(zipHit.point.clone().addScaledVector(normal, 0.72));
+        if (worldHit.face) normal.copy(worldHit.face.normal).transformDirection(worldHit.object.matrixWorld);
+        const destination = clampPointToMap(worldHit.point.clone().addScaledVector(normal, 0.72));
         destination.y = Math.max(MAP_DATA[selectedMap].minY ?? 0.74, destination.y);
         const start = threeFromCannon(playerBody.position);
-        webPullCooldownUntil = now + 1000;
-        webZipState = { start, point: zipHit.point.clone(), destination, startedAt: now, duration: THREE.MathUtils.clamp(start.distanceTo(destination) * 34, 480, 1250) };
+        webZipState = { start, point: worldHit.point.clone(), destination, startedAt: now, duration: THREE.MathUtils.clamp(start.distanceTo(destination) * 34, 480, 1250) };
         webPullState = null;
         webShootPoseUntil = now + webZipState.duration;
         playerBody.velocity.set(0, 0, 0);
@@ -3787,18 +3924,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         showMessage("Web Zip", 700);
         return;
       }
-      webPullCooldownUntil = now + 1000;
-      webShootPoseUntil = now + 900;
-      const projectile = createWebNet(0.32);
-      projectile.position.copy(webHandPosition());
-      scene.add(projectile);
-      raycaster.setFromCamera(mouseNdc, camera);
-      const direction = raycaster.ray.direction.clone().normalize();
-      const destination = projectile.position.clone().addScaledVector(direction, 52);
-      activeWebProjectiles.push({ mode: "pull", net: projectile, start: projectile.position.clone(), position: projectile.position.clone(), direction, speed: 48, maxRange: 52, startedAt: now, nextTrailAt: 0 });
-      queueNetworkVisual({ type: "web-projectile", start: projectile.position.toArray(), end: destination.toArray(), duration: 1083 });
-      playSfx("webSwingShoot");
-      showMessage("Web line fired", 650);
+      playSfx("cooldownDeny");
+      showMessage("Aim directly at a target to web pull", 650);
     }
 
     function resetSpiderWebState(clearTraps = true) {
@@ -4404,6 +4531,26 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return best;
     }
 
+    function findDirectRemoteRayTarget(maxDistance = 58, hitRadius = 0.82, blockerDistance = Infinity) {
+      if (selectedMap !== "pvpArena") return null;
+      const aimOrigin = raycaster.ray.origin.clone();
+      const aimDirection = raycaster.ray.direction.clone().normalize();
+      let best = null;
+      let bestAlong = Infinity;
+      remotePlayers.forEach((remote) => {
+        if (remote.health <= 0 || !remote.group.visible) return;
+        const center = remote.group.position.clone().add(new THREE.Vector3(0, 0.86, 0));
+        const offset = center.clone().sub(aimOrigin);
+        const along = offset.dot(aimDirection);
+        if (along < 0 || along > maxDistance || along >= blockerDistance || along >= bestAlong) return;
+        const miss = offset.addScaledVector(aimDirection, -along).length();
+        if (miss > hitRadius) return;
+        best = { remote, point: aimOrigin.clone().addScaledVector(aimDirection, along), distance: along };
+        bestAlong = along;
+      });
+      return best;
+    }
+
     function teleportPunchReset() {
       if (!canUseAbility(620)) return false;
       const startPos = threeFromCannon(playerBody.position);
@@ -4469,8 +4616,14 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       const startPosition = threeFromCannon(playerBody.position);
-      const remoteTarget = findRemoteCombatTarget(startPosition, getCameraForward(true), 58, 0.78);
-      const hit = remoteTarget ? null : centerRaycast(58);
+      raycaster.setFromCamera(mouseNdc, camera);
+      raycaster.far = 58;
+      const directHit = raycaster.intersectObjects(raycastTargets, true)
+        .map((hit) => ({ ...hit, target: resolveTarget(hit.object) }))
+        .find((hit) => hit.target && hit.target !== playerGroup && hit.target.visible !== false);
+      const directRemote = findDirectRemoteRayTarget(58, 0.82, directHit?.distance ?? Infinity);
+      const remoteTarget = directRemote?.remote || null;
+      const hit = remoteTarget ? null : directHit;
       if (!remoteTarget && !hit) {
         showMessage("No teleport surface found.");
         return;
@@ -4478,7 +4631,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
       const minTeleportY = MAP_DATA[selectedMap].minY ?? 0.74;
       playSfx("teleport");
-      teleportMoveCooldownUntil = now + 1000;
+      teleportMoveCooldownUntil = now + 1500;
       teleportMovePoseUntil = now + 360;
 
       if (remoteTarget || hit.target.userData.type === "dummy") {
@@ -4806,7 +4959,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
       const enemy = nearestStrengthEnemy();
       if (enemy?.type === "player") {
-        strengthGrabCooldownUntil = now + 1200;
+        strengthGrabCooldownUntil = now + STRENGTH_PLAYER_GRAB_COOLDOWN;
         multiplayerClient?.sendAction({ kind: "strength-grab-player", targetId: enemy.id });
         showMessage("Grabbing player…", 700);
         return;
@@ -6438,6 +6591,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const flyState = flyMeterCharge >= 0.999 ? (flightJumpArmed ? "Airborne: press Space" : "Full: jump to arm") : flightSprintActive ? `Charging ${Math.round(flyMeterCharge * 100)}%` : `Sprint to charge — ${Math.round(flyMeterCharge * 100)}%`;
       flyMeterState.textContent = flyState;
       flyMeter.dataset.state = flyMeterCharge >= 0.999 ? "full" : flightSprintActive ? "charging" : "idle";
+      const showHoldEscape = Boolean(grabbedById && ["strength", "telekinesis"].includes(grabbedMode));
+      holdEscapeMeter.hidden = !showHoldEscape;
+      if (showHoldEscape) {
+        holdEscapeFill.style.width = `${Math.round(THREE.MathUtils.clamp(holdEscapeProgress, 0, 1) * 100)}%`;
+        holdEscapeState.textContent = `${grabbedMode === "telekinesis" ? "Telekinesis" : "Strength"} hold — mash Space`;
+        holdEscapeMeter.dataset.pulse = performance.now() < holdEscapePulseUntil ? "true" : "false";
+      } else {
+        holdEscapeFill.style.width = "0%";
+        holdEscapeMeter.dataset.pulse = "false";
+      }
       const robotCooldownText = selectedPower === "robot"
         ? robotShieldMode
           ? `Shield ${Math.max(0, (robotShieldEndsAt - now) / 1000).toFixed(1)}s`
@@ -6573,6 +6736,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       robotShotCooldownUntil = 0;
       playerHealth = maxPlayerHealth(power);
       playerDamageFlash = 0;
+      pvpCombatUntil = 0;
+      resetHoldEscape();
       playerForcedMotionUntil = 0;
       playerTumbleUntil = 0;
       isPointerDown = false;
@@ -6685,6 +6850,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function setPaused(paused) {
       if (!gameStarted || gamePaused === paused) return;
+      if (paused && isPvpCombatLocked()) {
+        showCombatLockedMessage();
+        return;
+      }
       gamePaused = paused;
       if (paused) cancelFlightStrike(true);
       releaseActiveInputs();
@@ -6711,10 +6880,29 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     resumeButton.addEventListener("click", () => setPaused(false));
-    restartButton.addEventListener("click", () => startGame(selectedPower));
-    mainMenuButton.addEventListener("click", () => window.location.reload());
+    restartButton.addEventListener("click", () => {
+      if (isPvpCombatLocked()) {
+        showCombatLockedMessage();
+        setPaused(false);
+        return;
+      }
+      startGame(selectedPower);
+    });
+    mainMenuButton.addEventListener("click", () => {
+      if (isPvpCombatLocked()) {
+        showCombatLockedMessage();
+        setPaused(false);
+        return;
+      }
+      window.location.reload();
+    });
     swapPowerButton.addEventListener("click", () => {
       const nextPower = powerSwapSelect.value;
+      if (isPvpCombatLocked()) {
+        showCombatLockedMessage();
+        setPaused(false);
+        return;
+      }
       if (!POWER_DATA[nextPower] || nextPower === selectedPower) {
         setPaused(false);
         return;
@@ -6725,6 +6913,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     });
     swapMapButton.addEventListener("click", () => {
       const nextMap = mapSwapSelect.value;
+      if (isPvpCombatLocked()) {
+        showCombatLockedMessage();
+        setPaused(false);
+        return;
+      }
       if (!MAP_DATA[nextMap] || (MAP_DATA[nextMap].onlineOnly && !onlineMode) || nextMap === selectedMap) {
         setPaused(false);
         return;
@@ -6957,6 +7150,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       if (grabbedById) {
+        if (event.code === "Space" && !event.repeat) handleHoldEscapeTap();
         event.preventDefault();
         return;
       }
