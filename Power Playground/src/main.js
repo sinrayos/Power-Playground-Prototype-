@@ -1,7 +1,7 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
 import { MAP_DATA, POWER_DATA } from "./config.js?v=20260710-power-station";
-import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260710-power-station";
+import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260710-pop-theme";
 import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v2";
 
     const keys = new Set();
@@ -603,6 +603,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const PVP_SPAWN_SLOTS = [[-31, -18], [31, 18], [-31, 18], [31, -18], [-18, -31], [18, 31], [-18, 31], [18, -31]];
     const PVP_JUMP_PADS = [[-27, -27], [27, -27], [-27, 27], [27, 27], [-11, 0], [11, 0]];
     const POWER_STATION_CENTER_Z = 786;
+    const POWER_STATION_TRAIN_PERIOD_MS = 45000;
+    const POWER_STATION_TRAIN_WARNING_MS = 6500;
+    const POWER_STATION_TRAIN_ACTIVE_MS = 3300;
+    const POWER_STATION_TRAIN_VISIBLE_EDGE_X = 52;
     const PVP_MAP_CONFIG = {
       pvpArena: {
         centerZ: PVP_CENTER_Z,
@@ -622,11 +626,36 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let stationTrainState = null;
     let stationTrainAnnouncedEvent = null;
     let stationTrainPulseAt = 0;
+    let localTrainHitEventId = null;
     let startMenuEntered = false;
     const ATTRACT_MAPS = ["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"];
 
     function isPvpMap(mapKey = selectedMap) {
       return Boolean(PVP_MAP_CONFIG[mapKey]);
+    }
+
+    function predictedPowerStationTrainState(now = performance.now()) {
+      const wallNow = Date.now();
+      const cycle = Math.floor(wallNow / POWER_STATION_TRAIN_PERIOD_MS);
+      const periodStart = cycle * POWER_STATION_TRAIN_PERIOD_MS;
+      const activeFromWall = periodStart + POWER_STATION_TRAIN_PERIOD_MS - POWER_STATION_TRAIN_ACTIVE_MS;
+      const activeUntilWall = periodStart + POWER_STATION_TRAIN_PERIOD_MS;
+      const warningAtWall = activeFromWall - POWER_STATION_TRAIN_WARNING_MS;
+      const phase = wallNow >= activeFromWall && wallNow < activeUntilWall
+        ? "active"
+        : wallNow >= warningAtWall && wallNow < activeFromWall
+          ? "warning"
+          : "idle";
+      return {
+        map: "powerStation",
+        eventId: `local-train:${cycle}`,
+        phase,
+        warningAt: now + (warningAtWall - wallNow),
+        activeFrom: now + (activeFromWall - wallNow),
+        activeUntil: now + (activeUntilWall - wallNow),
+        nextArrivalAt: now + (activeFromWall - wallNow),
+        direction: cycle % 2 === 0 ? 1 : -1,
+      };
     }
 
     function updateAttractPreview(now) {
@@ -1678,14 +1707,36 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const trainMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.48, metalness: 0.22 });
       const trainWindowMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, emissive: 0x2563eb, emissiveIntensity: 0.28, roughness: 0.2 });
       const headlightMat = new THREE.MeshStandardMaterial({ color: 0xfff7ad, emissive: 0xfff7ad, emissiveIntensity: 1.9, roughness: 0.2 });
+      const tunnelMat = new THREE.MeshStandardMaterial({ color: 0x05070b, roughness: 0.95, metalness: 0.0, emissive: 0x020617, emissiveIntensity: 0.18 });
+      const tunnelFrameMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.56, metalness: 0.42 });
 
       addVisualFloor("power station platform", 86, 40, new THREE.Vector3(0, 0.012, z - 22), stationFloorMat);
-      addVisualFloor("power station track bed", 86, 28, new THREE.Vector3(0, -0.42, z + 24), trackBedMat);
+      addVisualFloor("power station track bed", 86, 44, new THREE.Vector3(0, 0.016, z + 20), trackBedMat);
       addStaticBox("power station north wall", new THREE.Vector3(88, 14, 0.8), new THREE.Vector3(0, 7, z - 43), wallMat);
       addStaticBox("power station south fence", new THREE.Vector3(88, 3.6, 0.7), new THREE.Vector3(0, 1.8, z + 42), metalMat);
       addStaticBox("power station west wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(-43, 6.5, z + 1), wallMat);
       addStaticBox("power station east wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(43, 6.5, z + 1), wallMat);
       addRoof("power station arched roof", new THREE.Vector3(88, 0.55, 118), new THREE.Vector3(0, 15.2, z + 1));
+
+      [-1, 1].forEach((side) => {
+        const portalX = side * 42.52;
+        const portal = new THREE.Mesh(new THREE.BoxGeometry(0.22, 7.4, 20), tunnelMat);
+        portal.position.set(portalX, 3.75, z + 20.5);
+        portal.castShadow = false;
+        portal.receiveShadow = true;
+        scene.add(portal);
+        const frameTop = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.55, 23), tunnelFrameMat);
+        frameTop.position.set(portalX - side * 0.02, 7.72, z + 20.5);
+        scene.add(frameTop);
+        [-1, 1].forEach((edge) => {
+          const frameSide = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.8, 0.55), tunnelFrameMat);
+          frameSide.position.set(portalX - side * 0.02, 3.9, z + 20.5 + edge * 10.4);
+          scene.add(frameSide);
+        });
+        const tunnelGlow = new THREE.PointLight(0x2563eb, 0.45, 16, 1.8);
+        tunnelGlow.position.set(portalX - side * 2.4, 3.2, z + 20.5);
+        scene.add(tunnelGlow);
+      });
 
       addTrackMark("power station yellow safety strip", new THREE.Vector3(82, 0.09, 1.6), new THREE.Vector3(0, 0.09, z - 2.2), 0xfacc15);
       addTrackMark("power station rear yellow strip", new THREE.Vector3(82, 0.07, 0.8), new THREE.Vector3(0, 0.075, z - 36.5), 0xfacc15);
@@ -1708,14 +1759,6 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           addTrackMark(`power station sleeper ${side}-${x}`, new THREE.Vector3(0.42, 0.08, 9.2), new THREE.Vector3(x, -0.16, z + 20.1), 0x5b4636);
         }
       });
-
-      addStaticBox("power station raised walkway", new THREE.Vector3(31, 1.1, 9), new THREE.Vector3(24, 4.15, z - 31), obstacleMat);
-      addStaticBox("power station walkway rail north", new THREE.Vector3(31, 1.4, 0.28), new THREE.Vector3(24, 5.2, z - 35.5), metalMat);
-      addStaticBox("power station walkway rail south", new THREE.Vector3(31, 1.4, 0.28), new THREE.Vector3(24, 5.2, z - 26.5), metalMat);
-      addStaticRamp("power station west stair ramp", new THREE.Vector3(7, 0.34, 16), new THREE.Vector3(5, 2.05, z - 28.8), -0.26, stationFloorMat);
-      for (let i = 0; i < 9; i += 1) {
-        addTrackMark(`power station stair tread ${i + 1}`, new THREE.Vector3(7.2, 0.09, 0.56), new THREE.Vector3(5, 0.32 + i * 0.44, z - 36 + i * 1.35), 0xcbd5e1);
-      }
 
       const kiosk = addStaticBox("power station power kiosk", new THREE.Vector3(6, 5, 2), new THREE.Vector3(-35, 2.5, z - 33), obstacleMat);
       kiosk.mesh.material = [
@@ -3328,35 +3371,74 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function updatePowerStationTrain(now) {
       if (!stationTrainGroup) return;
-      if (selectedMap !== "powerStation" || !stationTrainState) {
+      if (selectedMap !== "powerStation") {
         stationTrainGroup.visible = false;
         return;
       }
-      const direction = Number(stationTrainState.direction) >= 0 ? 1 : -1;
-      const warningAt = Number(stationTrainState.warningAt) || 0;
-      const activeFrom = Number(stationTrainState.activeFrom) || 0;
-      const activeUntil = Number(stationTrainState.activeUntil) || 0;
-      let visible = false;
-      let x = -140 * direction;
+      const predicted = predictedPowerStationTrainState(now);
+      const serverStateCurrent = stationTrainState && now < (Number(stationTrainState.activeUntil) || 0) + 2200;
+      const trainState = serverStateCurrent ? stationTrainState : predicted;
+      const direction = Number(trainState.direction) >= 0 ? 1 : -1;
+      const warningAt = Number(trainState.warningAt) || predicted.warningAt;
+      const activeFrom = Number(trainState.activeFrom) || predicted.activeFrom;
+      const activeUntil = Number(trainState.activeUntil) || predicted.activeUntil;
+      let visible = true;
+      let x = -POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction;
       if (now >= warningAt && now < activeFrom) {
         const progress = THREE.MathUtils.clamp((now - warningAt) / Math.max(1, activeFrom - warningAt), 0, 1);
-        x = THREE.MathUtils.lerp(-138 * direction, -70 * direction, progress);
-        visible = true;
+        x = THREE.MathUtils.lerp(-POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction, -58 * direction, progress);
       } else if (now >= activeFrom && now <= activeUntil) {
         const progress = THREE.MathUtils.clamp((now - activeFrom) / Math.max(1, activeUntil - activeFrom), 0, 1);
-        x = THREE.MathUtils.lerp(-78 * direction, 78 * direction, progress);
-        visible = true;
+        x = THREE.MathUtils.lerp(-58 * direction, 58 * direction, progress);
+      } else if (now > activeUntil) {
+        x = POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction;
       }
       stationTrainGroup.visible = visible;
       if (!visible) return;
       stationTrainGroup.position.x = x;
       stationTrainGroup.rotation.y = direction > 0 ? 0 : Math.PI;
       if (now >= stationTrainPulseAt) {
-        stationTrainPulseAt = now + (stationTrainState.phase === "active" ? 160 : 420);
+        stationTrainPulseAt = now + (trainState.phase === "active" ? 160 : 420);
         const trackPoint = new THREE.Vector3(0, 0.08, POWER_STATION_CENTER_Z + 20.5);
         const phasePulse = 0.45 + Math.sin(now * 0.018) * 0.2;
-        spawnRing(trackPoint, stationTrainState.phase === "active" ? 0xef4444 : 0xfacc15, 0.35 + phasePulse * 0.15, 1.45 + phasePulse * 0.3, 0.14);
+        spawnRing(trackPoint, trainState.phase === "active" ? 0xef4444 : 0xfacc15, 0.35 + phasePulse * 0.15, 1.45 + phasePulse * 0.3, 0.14);
       }
+      applyLocalPowerStationTrainHit(trainState, direction);
+    }
+
+    function applyLocalPowerStationTrainHit(trainState, direction) {
+      if (onlineMode || !gameStarted || localDefeat || pvpRespawnAt || selectedMap !== "powerStation") return;
+      if (trainState.phase !== "active" || localTrainHitEventId === trainState.eventId) return;
+      const x = playerBody.position.x;
+      const y = playerBody.position.y;
+      const z = playerBody.position.z;
+      if (x < -41 || x > 41 || y < -1.2 || y > 4.8 || z < POWER_STATION_CENTER_Z + 14.2 || z > POWER_STATION_CENTER_Z + 27.3) return;
+      localTrainHitEventId = trainState.eventId;
+      playerHealth = 0;
+      playerDamageFlash = 0.85;
+      playerBody.velocity.set(direction * 30, 8, 0);
+      cancelFlightStrike(true);
+      releaseActiveInputs();
+      clearPlayerWebWrap();
+      grabbedById = null;
+      grabbedMode = null;
+      resetHoldEscape();
+      soloDefeatSequence += 1;
+      const position = threeFromCannon(playerBody.position);
+      beginDefeatEffect({
+        type: "player-defeated",
+        defeatId: `station-train:${soloDefeatSequence}`,
+        id: "local",
+        attackerId: null,
+        map: selectedMap,
+        position: position.toArray(),
+        orientation: playerGroup.quaternion.toArray(),
+        forward: [direction, 0, 0],
+        power: selectedPower,
+        seed: (0x51a710 ^ soloDefeatSequence) >>> 0,
+        respawnAt: Date.now() + 4400,
+      }, true);
+      showMessage("Hit by the train — respawning…", 2400);
     }
 
     function applyPvpRespawn(packet) {

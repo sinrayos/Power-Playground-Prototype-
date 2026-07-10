@@ -79,33 +79,141 @@ function playDefeatMp3() {
 function scheduleMenuMusicStep() {
   if (!menuMusicGain) return;
   const ctx = getAudioContext();
-  const melody = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23, 246.94, 293.66, 392, 293.66, 220, 261.63, 329.63, 392];
-  const roots = [130.81, 146.83, 123.47, 110];
   const now = ctx.currentTime;
-  const note = ctx.createOscillator();
-  const noteGain = ctx.createGain();
-  note.type = "triangle";
-  note.frequency.setValueAtTime(melody[menuMusicStep], now);
-  noteGain.gain.setValueAtTime(0.0001, now);
-  noteGain.gain.exponentialRampToValueAtTime(0.022, now + 0.025);
-  noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.27);
-  note.connect(noteGain).connect(menuMusicGain);
-  note.start(now);
-  note.stop(now + 0.3);
+  const step = menuMusicStep % 128;
+  const beat = step % 16;
+  const bar = Math.floor(step / 16);
+  const progression = [
+    { root: 110, chord: [1, 1.2, 1.5], melody: [440, 523.25, 659.25, 587.33] },
+    { root: 87.31, chord: [1, 1.25, 1.5], melody: [392, 523.25, 587.33, 523.25] },
+    { root: 130.81, chord: [1, 1.25, 1.5], melody: [523.25, 659.25, 783.99, 659.25] },
+    { root: 98, chord: [1, 1.25, 1.498], melody: [493.88, 587.33, 739.99, 659.25] },
+    { root: 110, chord: [1, 1.2, 1.5], melody: [659.25, 587.33, 523.25, 440] },
+    { root: 87.31, chord: [1, 1.25, 1.5], melody: [523.25, 587.33, 659.25, 783.99] },
+    { root: 130.81, chord: [1, 1.25, 1.5], melody: [783.99, 659.25, 587.33, 523.25] },
+    { root: 98, chord: [1, 1.25, 1.498], melody: [587.33, 659.25, 739.99, 880] },
+  ][bar];
+  const melodySlots = [2, 5, 8, 11];
+  const melodyIndex = melodySlots.indexOf(beat);
 
-  if (menuMusicStep % 4 === 0) {
+  if (beat === 0 || beat === 4 || beat === 8 || beat === 12) {
+    const kick = ctx.createOscillator();
+    const kickGain = ctx.createGain();
+    kick.type = "sine";
+    kick.frequency.setValueAtTime(128, now);
+    kick.frequency.exponentialRampToValueAtTime(44, now + 0.15);
+    kickGain.gain.setValueAtTime(0.0001, now);
+    kickGain.gain.exponentialRampToValueAtTime(beat === 0 ? 0.15 : 0.11, now + 0.01);
+    kickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.21);
+    kick.connect(kickGain).connect(menuMusicGain);
+    kick.start(now);
+    kick.stop(now + 0.24);
+  }
+
+  if (beat === 4 || beat === 12 || (bar === 7 && beat === 15)) {
+    const frames = Math.max(1, Math.floor(ctx.sampleRate * 0.16));
+    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const clap = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const clapGain = ctx.createGain();
+    filter.type = "bandpass";
+    filter.frequency.value = beat === 15 ? 2700 : 1850;
+    filter.Q.value = 1.25;
+    clapGain.gain.setValueAtTime(beat === 15 ? 0.04 : 0.067, now);
+    clapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    clap.buffer = buffer;
+    clap.connect(filter).connect(clapGain).connect(menuMusicGain);
+    clap.start(now);
+  }
+
+  if (beat % 2 === 1 || (bar >= 4 && [2, 6, 10, 14].includes(beat))) {
+    const frames = Math.max(1, Math.floor(ctx.sampleRate * 0.045));
+    const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+    const hat = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const hatGain = ctx.createGain();
+    filter.type = "highpass";
+    filter.frequency.value = 7600;
+    hatGain.gain.setValueAtTime(beat === 15 ? 0.03 : 0.017, now);
+    hatGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+    hat.buffer = buffer;
+    hat.connect(filter).connect(hatGain).connect(menuMusicGain);
+    hat.start(now);
+  }
+
+  if (beat % 2 === 0) {
     const bass = ctx.createOscillator();
     const bassGain = ctx.createGain();
-    bass.type = "sine";
-    bass.frequency.setValueAtTime(roots[Math.floor(menuMusicStep / 4)], now);
+    const bassFilter = ctx.createBiquadFilter();
+    bass.type = "sawtooth";
+    const lift = [0, 8, 14].includes(beat) ? 1.5 : [10, 12].includes(beat) ? 1.25 : 1;
+    bass.frequency.setValueAtTime(progression.root * lift, now);
+    bassFilter.type = "lowpass";
+    bassFilter.frequency.setValueAtTime(560, now);
     bassGain.gain.setValueAtTime(0.0001, now);
-    bassGain.gain.exponentialRampToValueAtTime(0.016, now + 0.04);
-    bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.05);
-    bass.connect(bassGain).connect(menuMusicGain);
+    bassGain.gain.exponentialRampToValueAtTime(0.034, now + 0.018);
+    bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.19);
+    bass.connect(bassFilter).connect(bassGain).connect(menuMusicGain);
     bass.start(now);
-    bass.stop(now + 1.1);
+    bass.stop(now + 0.22);
   }
-  menuMusicStep = (menuMusicStep + 1) % melody.length;
+
+  if (beat === 0 || beat === 8) {
+    progression.chord.forEach((ratio, index) => {
+      const chord = ctx.createOscillator();
+      const chordGain = ctx.createGain();
+      const chordFilter = ctx.createBiquadFilter();
+      chord.type = index === 1 ? "triangle" : "sawtooth";
+      chord.frequency.setValueAtTime(progression.root * ratio * (beat === 8 ? 4 : 2), now);
+      chordFilter.type = "lowpass";
+      chordFilter.frequency.setValueAtTime(2100 + bar * 90, now);
+      chordGain.gain.setValueAtTime(0.0001, now);
+      chordGain.gain.exponentialRampToValueAtTime(0.012, now + 0.025 + index * 0.006);
+      chordGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+      chord.connect(chordFilter).connect(chordGain).connect(menuMusicGain);
+      chord.start(now);
+      chord.stop(now + 0.58);
+    });
+  }
+
+  if (melodyIndex >= 0 || (bar >= 4 && [13, 15].includes(beat))) {
+    const note = ctx.createOscillator();
+    const noteGain = ctx.createGain();
+    const noteFilter = ctx.createBiquadFilter();
+    const melodyNote = melodyIndex >= 0
+      ? progression.melody[melodyIndex]
+      : progression.melody[beat === 13 ? 2 : 3] * 1.125;
+    note.type = bar >= 4 ? "sawtooth" : "triangle";
+    note.frequency.setValueAtTime(melodyNote, now);
+    note.frequency.exponentialRampToValueAtTime(melodyNote * 1.006, now + 0.12);
+    noteFilter.type = "lowpass";
+    noteFilter.frequency.setValueAtTime(bar >= 4 ? 3600 : 2800, now);
+    noteGain.gain.setValueAtTime(0.0001, now);
+    noteGain.gain.exponentialRampToValueAtTime(bar >= 4 ? 0.034 : 0.026, now + 0.014);
+    noteGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    note.connect(noteFilter).connect(noteGain).connect(menuMusicGain);
+    note.start(now);
+    note.stop(now + 0.27);
+  }
+
+  if (beat === 15 && bar % 2 === 1) {
+    const riser = ctx.createOscillator();
+    const riserGain = ctx.createGain();
+    riser.type = "triangle";
+    riser.frequency.setValueAtTime(bar === 7 ? 246.94 : 196, now);
+    riser.frequency.exponentialRampToValueAtTime(bar === 7 ? 987.77 : 659.25, now + 0.35);
+    riserGain.gain.setValueAtTime(0.0001, now);
+    riserGain.gain.exponentialRampToValueAtTime(0.018, now + 0.03);
+    riserGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
+    riser.connect(riserGain).connect(menuMusicGain);
+    riser.start(now);
+    riser.stop(now + 0.38);
+  }
+  menuMusicStep = (menuMusicStep + 1) % 128;
 }
 
 export function startMenuMusic() {
@@ -118,7 +226,7 @@ export function startMenuMusic() {
     menuMusicGain.connect(ctx.destination);
     menuMusicStep = 0;
     scheduleMenuMusicStep();
-    menuMusicTimer = window.setInterval(scheduleMenuMusicStep, 310);
+    menuMusicTimer = window.setInterval(scheduleMenuMusicStep, 125);
   } catch (error) {
     // Audio is optional and may be blocked before the first interaction.
   }
