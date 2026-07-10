@@ -27,8 +27,24 @@ const DEFEAT_RESPAWN_DELAY = 4400;
 const FLIGHT_STRIKE_COOLDOWN = 12000;
 const MAP_BOUNDS = {
   hub: [-23.6, 23.6, -23.6, 23.6], speedTrack: [-56.5, 56.5, 70.5, 161.5], minionArena: [-35.5, 35.5, 184.5, 253.5],
-  strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688],
+  strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688], powerStation: [-43, 43, 724, 842],
 };
+const PVP_MAPS = new Set(["pvpArena", "powerStation"]);
+const POWER_STATION_CENTER_Z = 786;
+const TRAIN_PERIOD_MS = 45000;
+const TRAIN_WARNING_MS = 6500;
+const TRAIN_ACTIVE_MS = 3300;
+const TRAIN_PATH = {
+  minX: -41,
+  maxX: 41,
+  minY: -1.2,
+  maxY: 4.8,
+  minZ: POWER_STATION_CENTER_Z + 14.2,
+  maxZ: POWER_STATION_CENTER_Z + 27.3,
+};
+function isPvpMap(map) {
+  return PVP_MAPS.has(map);
+}
 const maxHealthForPower = (power) => power === "strength" ? 150 : 100;
 const ALLOWED_ORIGINS = new Set([
   "https://powerplayground.netlify.app",
@@ -130,6 +146,7 @@ export class GameRoom {
     this.entitySnapshots = new Map();
     this.thrownEntities = new Map();
     this.webTraps = new Map();
+    this.lastHazardPhase = new Map();
     this.ready = this.restoreSessions();
   }
 
@@ -149,7 +166,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, lastTrainHitId: null, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -161,6 +178,7 @@ export class GameRoom {
       id,
       hostId: this.hostId,
       entities: [...this.entitySnapshots.entries()].map(([map, snapshot]) => ({ map, snapshot })),
+      hazards: [this.powerStationTrainState(Date.now())],
       players: [...this.players.values()]
         .filter((entry) => entry.id !== id)
         .map(({ socket: _socket, ...entry }) => entry),
@@ -213,7 +231,9 @@ export class GameRoom {
     }
 
     if (message.type === "state" && message.state && typeof message.state === "object") {
-      if (player.respawnAt && Date.now() >= player.respawnAt) {
+      const now = Date.now();
+      this.updateMapHazards(now);
+      if (player.respawnAt && now >= player.respawnAt) {
         player.health = player.maxHealth || maxHealthForPower(player.power);
         player.respawnAt = 0;
         player.activeDefeatId = null;
@@ -246,6 +266,7 @@ export class GameRoom {
         phaseBootsCooldownUntil: player.phaseBootsCooldownUntil || 0,
       };
       this.savePlayer(socket, player);
+      if (this.checkPowerStationTrainHit(player, now)) return;
       this.checkWebTraps(player);
       this.broadcast({ type: "player-state", id: player.id, state: player.state }, player.id);
       return;
@@ -301,10 +322,78 @@ export class GameRoom {
     }
   }
 
+  powerStationTrainState(now = Date.now()) {
+    const cycle = Math.floor(now / TRAIN_PERIOD_MS);
+    const periodStart = cycle * TRAIN_PERIOD_MS;
+    const activeFrom = periodStart + TRAIN_PERIOD_MS - TRAIN_ACTIVE_MS;
+    const activeUntil = periodStart + TRAIN_PERIOD_MS;
+    const warningAt = activeFrom - TRAIN_WARNING_MS;
+    const phase = now >= activeFrom && now < activeUntil
+      ? "active"
+      : now >= warningAt && now < activeFrom
+        ? "warning"
+        : "idle";
+    return {
+      map: "powerStation",
+      eventId: `train:${cycle}`,
+      phase,
+      warningAt,
+      activeFrom,
+      activeUntil,
+      nextArrivalAt: activeFrom,
+      direction: cycle % 2 === 0 ? 1 : -1,
+    };
+  }
+
+  updateMapHazards(now = Date.now()) {
+    const train = this.powerStationTrainState(now);
+    const key = `${train.eventId}:${train.phase}`;
+    if (this.lastHazardPhase.get(train.map) === key) return;
+    this.lastHazardPhase.set(train.map, key);
+    this.broadcastToMap(train.map, { type: "map-hazard", ...train });
+  }
+
+  checkPowerStationTrainHit(player, now = Date.now()) {
+    if (player.map !== "powerStation" || player.health <= 0 || player.respawnAt || !player.state?.position) return false;
+    const train = this.powerStationTrainState(now);
+    if (train.phase !== "active" || player.lastTrainHitId === train.eventId) return false;
+    const [x, y, z] = safeVector(player.state.position);
+    if (x < TRAIN_PATH.minX || x > TRAIN_PATH.maxX || y < TRAIN_PATH.minY || y > TRAIN_PATH.maxY || z < TRAIN_PATH.minZ || z > TRAIN_PATH.maxZ) return false;
+    player.lastTrainHitId = train.eventId;
+    player.health = 0;
+    player.respawnAt = now + DEFEAT_RESPAWN_DELAY;
+    player.grabbedBy = null;
+    player.grabbedMode = null;
+    player.holdEscapeProgress = 0;
+    player.lastHoldEscapeTapAt = 0;
+    player.shieldActive = false;
+    player.shieldEndsAt = 0;
+    player.flightStrike = null;
+    this.clearWebStatus(player);
+    this.releaseVictimsHeldBy(player.id);
+    this.releaseWebVictimsBy(player.id);
+    this.savePlayer(player.socket, player);
+    const impulseX = train.direction * 28;
+    this.broadcastToMap(player.map, {
+      type: "pvp-hit",
+      attackerId: null,
+      targetId: player.id,
+      health: 0,
+      damage: player.maxHealth || maxHealthForPower(player.power),
+      impulse: [impulseX, 8, 0],
+      defeated: true,
+      respawnAt: player.respawnAt,
+      power: "train",
+      position: [x, y, z],
+    });
+    this.announceDefeat(player, null);
+    return true;
+  }
+
   handleStrengthGrab(attacker, action) {
     const target = this.players.get(String(action.targetId || ""));
     if (!target || target.id === attacker.id || attacker.power !== "strength") return;
-    if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return;
+    if (!isPvpMap(attacker.map) || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return;
     if (attacker.grabbedBy || target.grabbedBy || !attacker.state?.position || !target.state?.position) return;
     const now = Date.now();
     if (now - (attacker.lastGrabAt || 0) < STRENGTH_PLAYER_GRAB_COOLDOWN) return;
@@ -359,7 +448,7 @@ export class GameRoom {
   handleTelekinesisGrab(attacker, action) {
     const target = this.players.get(String(action.targetId || ""));
     if (!target || target.id === attacker.id || attacker.power !== "telekinesis") return;
-    if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.grabbedBy || target.grabbedBy || attacker.health <= 0 || target.health <= 0) return;
+    if (!isPvpMap(attacker.map) || target.map !== attacker.map || attacker.grabbedBy || target.grabbedBy || attacker.health <= 0 || target.health <= 0) return;
     if (!attacker.state?.position || !target.state?.position) return;
     const now = Date.now();
     if (now - (attacker.lastTelekinesisGrabAt || 0) < TELEKINESIS_GRAB_COOLDOWN) return;
@@ -468,7 +557,7 @@ export class GameRoom {
   handleStrengthEntityThrow(attacker, action) {
     this.broadcast({ type: "player-action", id: attacker.id, action }, attacker.id);
     const throwPower = action.kind.startsWith("telekinesis") ? "telekinesis" : "strength";
-    if (attacker.power !== throwPower || attacker.map !== "pvpArena" || attacker.health <= 0) return;
+    if (attacker.power !== throwPower || !isPvpMap(attacker.map) || attacker.health <= 0) return;
     const velocity = safeVector(action.velocity, [0, 0, -1]);
     const key = `${attacker.map}:${String(action.entityType)}:${Number(action.entityId)}`;
     this.thrownEntities.set(key, { attackerId: attacker.id, velocity, power: throwPower, damage: throwPower === "telekinesis" ? 8 : 12, expiresAt: Date.now() + 2200, hitIds: new Set() });
@@ -503,7 +592,7 @@ export class GameRoom {
   }
 
   handleStrongSword(attacker) {
-    if (attacker.power !== "strength" || attacker.map !== "pvpArena" || attacker.grabbedBy || !attacker.state?.position) return;
+    if (attacker.power !== "strength" || !isPvpMap(attacker.map) || attacker.grabbedBy || !attacker.state?.position) return;
     if ([...this.players.values()].some((player) => player.grabbedBy === attacker.id)) return;
     const now = Date.now();
     if (now - (attacker.lastSwordAt || 0) < 7000) return;
@@ -529,7 +618,7 @@ export class GameRoom {
 
   handleTeleportBackstab(attacker, action) {
     const target = this.players.get(String(action.targetId || ""));
-    if (!target || target.id === attacker.id || attacker.power !== "teleport" || attacker.map !== "pvpArena") return;
+    if (!target || target.id === attacker.id || attacker.power !== "teleport" || !isPvpMap(attacker.map)) return;
     if (target.map !== attacker.map || attacker.grabbedBy || attacker.health <= 0 || target.health <= 0 || !attacker.state?.position || !target.state?.position) return;
     const now = Date.now();
     if (now - (attacker.lastBackstabAt || 0) < TELEPORT_BACKSTAB_COOLDOWN) return;
@@ -570,7 +659,7 @@ export class GameRoom {
   webTarget(attacker, targetId, range, projectile = {}) {
     const target = this.players.get(String(targetId || ""));
     if (!target || target.id === attacker.id || attacker.power !== "webs") return null;
-    if (attacker.map !== "pvpArena" || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return null;
+    if (!isPvpMap(attacker.map) || target.map !== attacker.map || attacker.health <= 0 || target.health <= 0) return null;
     if (attacker.grabbedBy || !attacker.state?.position || !target.state?.position) return null;
     const baseDx = target.state.position[0] - attacker.state.position[0];
     const baseDy = target.state.position[1] - attacker.state.position[1];
@@ -736,7 +825,7 @@ export class GameRoom {
     player.flightStrike = null;
     this.savePlayer(player.socket, player);
     this.broadcastToMap(player.map, { type: "flight-strike-impact", id: player.id, map: player.map, point, seed: (strike.startedAt ^ point[0] * 997 ^ point[2] * 991) >>> 0 });
-    if (player.map !== "pvpArena") return;
+    if (!isPvpMap(player.map)) return;
     for (const target of this.players.values()) {
       if (target.id === player.id || target.map !== player.map || target.health <= 0 || !target.state?.position) continue;
       const dx = target.state.position[0] - point[0];
@@ -934,7 +1023,7 @@ export class GameRoom {
   }
 
   resolvePvpAttack(attacker, action) {
-    if (attacker.map !== "pvpArena" || attacker.health <= 0 || !attacker.state?.position) return false;
+    if (!isPvpMap(attacker.map) || attacker.health <= 0 || !attacker.state?.position) return false;
     const spec = ATTACKS[attacker.power];
     if (!spec) return false;
     const now = Date.now();
@@ -948,7 +1037,7 @@ export class GameRoom {
     const origin = attacker.state.position;
     const forward = attacker.state.forward || [0, 0, -1];
     for (const target of this.players.values()) {
-      if (target.id === attacker.id || target.map !== "pvpArena" || target.health <= 0 || !target.state?.position) continue;
+      if (target.id === attacker.id || target.map !== attacker.map || target.health <= 0 || !target.state?.position) continue;
       const dx = target.state.position[0] - origin[0];
       const dz = target.state.position[2] - origin[2];
       const distance = Math.hypot(dx, dz);

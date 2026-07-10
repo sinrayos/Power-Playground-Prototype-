@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
-  <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./src/styles.css?v=20260709-hud-toggle" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260710-power-station" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -24,9 +24,19 @@
     </section>
   </div>
   <div id="startOverlay">
-    <main class="menu">
+    <div id="menuWallpaper" class="powerWallpaper" aria-hidden="true"></div>
+    <section id="startIntro" class="startIntro" aria-labelledby="startIntroTitle">
+      <div class="startIntroContent">
+        <div class="startIntroTitleBlock">
+          <p class="menuKicker">A 3D superhero sandbox</p>
+          <h1 id="startIntroTitle">Power Playground</h1>
+        </div>
+        <button id="startIntroButton" type="button">Start</button>
+      </div>
+    </section>
+    <main class="menu" hidden>
       <header class="menuHeader">
-        <div>
+        <div class="menuTitleBlock">
           <p class="menuKicker">A 3D superhero sandbox</p>
           <h1>Power Playground</h1>
         </div>
@@ -122,6 +132,7 @@
           <button class="mapButton" data-map="strengthPit"><span class="mapIndex">04</span><strong>Strength Pit</strong><span>A rugged dirt pit surrounded by rocks, stairs, and punching bags.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
           <button class="mapButton" data-map="city"><span class="mapIndex">05</span><strong>Power City</strong><span>An open skyline of roads, rooftops, pedestrians, and swing routes.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
           <button class="mapButton onlineOnlyMap" data-map="pvpArena" hidden><span class="mapIndex">06</span><strong>Prototype PvP Arena</strong><span>An online-only combat test chamber with cover, jump pads, and multiple respawn points.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
+          <button class="mapButton onlineOnlyMap" data-map="powerStation" hidden><span class="mapIndex">07</span><strong>Power Station</strong><span>A subway platform PvP arena with server-timed train danger on the tracks.</span><span class="mapPreviewHost" aria-hidden="true"></span></button>
         </div>
         <button id="backToHeroes" type="button">← Choose a different Power Guy</button>
       </section>
@@ -184,6 +195,7 @@
             <option value="strengthPit">Strength Pit</option>
             <option value="city">Power City</option>
             <option value="pvpArena">Prototype PvP Arena</option>
+            <option value="powerStation">Power Station</option>
           </select>
           <button id="swapMapButton" type="button">Switch Map</button>
         </div>
@@ -214,6 +226,6 @@
       <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
     </div>
   </div>
-  <script type="module" src="./src/main.js?v=20260709-phase-boots"></script>
+  <script type="module" src="./src/main.js?v=20260710-power-station"></script>
 </body>
 </html>

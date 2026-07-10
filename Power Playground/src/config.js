@@ -95,5 +95,13 @@ export const MAP_DATA = {
     minY: 0.74,
     onlineOnly: true,
     bounds: { minX: -38, maxX: 38, minZ: 612, maxZ: 688 }
+  },
+  powerStation: {
+    name: "Power Station",
+    spawn: new THREE.Vector3(0, 0.84, 756),
+    yaw: Math.PI,
+    minY: -1.2,
+    onlineOnly: true,
+    bounds: { minX: -43, maxX: 43, minZ: 724, maxZ: 842 }
   }
 };

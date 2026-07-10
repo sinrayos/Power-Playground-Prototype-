@@ -1,7 +1,7 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
-import { MAP_DATA, POWER_DATA } from "./config.js?v=20260708-flight-web-defeat";
-import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260708-flight-web-defeat";
+import { MAP_DATA, POWER_DATA } from "./config.js?v=20260710-power-station";
+import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260710-power-station";
 import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v2";
 
     const keys = new Set();
@@ -220,6 +220,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     const startOverlay = document.getElementById("startOverlay");
+    const startIntro = document.getElementById("startIntro");
+    const startIntroButton = document.getElementById("startIntroButton");
+    const menuRoot = document.querySelector("#startOverlay .menu");
+    const startIntroTitleBlock = document.querySelector(".startIntroTitleBlock");
+    const startIntroTitle = document.getElementById("startIntroTitle");
+    const menuTitle = document.querySelector(".menuTitleBlock h1");
     const modeStep = document.getElementById("modeStep");
     const heroStep = document.getElementById("heroStep");
     const mapStep = document.getElementById("mapStep");
@@ -279,6 +285,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const menuIconButton = document.getElementById("menuIconButton");
     const menuIconPanel = document.getElementById("menuIconPanel");
     const menuIconPicker = document.getElementById("menuIconPicker");
+    const menuWallpaper = document.getElementById("menuWallpaper");
     const mapSwapSelect = document.getElementById("mapSwapSelect");
     const swapMapButton = document.getElementById("swapMapButton");
     const mobileControls = document.getElementById("mobileControls");
@@ -370,8 +377,39 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       });
     }
 
+    function buildMenuWallpaper() {
+      if (!menuWallpaper || menuWallpaper.childElementCount) return;
+      const layout = [
+        ["speed", "8%", "18%", "92px", "-14deg", ".44", "large"],
+        ["strength", "20%", "82%", "112px", "10deg", ".34", ""],
+        ["teleport", "38%", "12%", "74px", "17deg", ".32", ""],
+        ["telekinesis", "54%", "84%", "132px", "-11deg", ".27", "large"],
+        ["flight", "72%", "16%", "108px", "9deg", ".35", ""],
+        ["jump", "89%", "70%", "96px", "-18deg", ".32", ""],
+        ["robot", "84%", "28%", "82px", "12deg", ".4", ""],
+        ["webs", "45%", "50%", "154px", "-8deg", ".2", "large"],
+        ["speed", "62%", "60%", "78px", "21deg", ".28", ""],
+        ["strength", "12%", "54%", "70px", "-20deg", ".3", ""],
+        ["teleport", "94%", "12%", "124px", "-12deg", ".22", "large"],
+        ["webs", "30%", "34%", "86px", "14deg", ".26", ""],
+      ];
+      layout.forEach(([power, x, y, size, rot, opacity, extra]) => {
+        const image = document.createElement("img");
+        image.className = `wallpaperSymbol ${extra}`.trim();
+        image.src = playerIconArt(`symbol-${power}`);
+        image.alt = "";
+        image.style.setProperty("--x", x);
+        image.style.setProperty("--y", y);
+        image.style.setProperty("--size", size);
+        image.style.setProperty("--rot", rot);
+        image.style.setProperty("--opacity", opacity);
+        menuWallpaper.appendChild(image);
+      });
+    }
+
     buildIconPicker(usernameIconPicker);
     buildIconPicker(menuIconPicker);
+    buildMenuWallpaper();
     try { localPlayerIcon = localStorage.getItem("powerPlaygroundPlayerIcon") || localPlayerIcon; } catch { /* Storage can be unavailable. */ }
     setLocalPlayerIcon(localPlayerIcon, false);
     menuIconButton.addEventListener("click", () => { menuIconPanel.hidden = !menuIconPanel.hidden; });
@@ -426,14 +464,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let menuPreviewHost = null;
     let menuPreviewMap = null;
 
-    const menuPreviewCenters = { hub: 0, speedTrack: 116, minionArena: 219, strengthPit: 318, city: 460, pvpArena: 650 };
+    const menuPreviewCenters = { hub: 0, speedTrack: 116, minionArena: 219, strengthPit: 318, city: 460, pvpArena: 650, powerStation: 786 };
     const menuPreviewCameras = {
       hub: { radius: 20, height: 10, targetY: 2.6 },
       speedTrack: { radius: 44, height: 17, targetY: 2.2 },
       minionArena: { radius: 28, height: 15, targetY: 2.1 },
       strengthPit: { radius: 28, height: 15, targetY: -1.2 },
       city: { radius: 82, height: 48, targetY: 8 },
-      pvpArena: { radius: 48, height: 24, targetY: 2.5 }
+      pvpArena: { radius: 48, height: 24, targetY: 2.5 },
+      powerStation: { radius: 62, height: 27, targetY: 2.2 }
     };
 
     function buildMenuPreview(mapKey) {
@@ -563,7 +602,53 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const PVP_CENTER_Z = 650;
     const PVP_SPAWN_SLOTS = [[-31, -18], [31, 18], [-31, 18], [31, -18], [-18, -31], [18, 31], [-18, 31], [18, -31]];
     const PVP_JUMP_PADS = [[-27, -27], [27, -27], [-27, 27], [27, 27], [-11, 0], [11, 0]];
+    const POWER_STATION_CENTER_Z = 786;
+    const PVP_MAP_CONFIG = {
+      pvpArena: {
+        centerZ: PVP_CENTER_Z,
+        spawnSlots: PVP_SPAWN_SLOTS,
+        jumpPads: PVP_JUMP_PADS,
+        safetyRadius: 45
+      },
+      powerStation: {
+        centerZ: POWER_STATION_CENTER_Z,
+        spawnSlots: [[-34, -40], [34, -40], [-26, -31], [26, -31], [-34, -20], [34, -20], [-16, -12], [16, -12]],
+        jumpPads: [],
+        safetyRadius: 66
+      }
+    };
     let pvpJumpPadCooldownUntil = 0;
+    let stationTrainGroup = null;
+    let stationTrainState = null;
+    let stationTrainAnnouncedEvent = null;
+    let stationTrainPulseAt = 0;
+    let startMenuEntered = false;
+    const ATTRACT_MAPS = ["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"];
+
+    function isPvpMap(mapKey = selectedMap) {
+      return Boolean(PVP_MAP_CONFIG[mapKey]);
+    }
+
+    function updateAttractPreview(now) {
+      if (gameStarted || startMenuEntered || startOverlay.style.display === "none") return false;
+      playerGroup.visible = false;
+      const mapIndex = Math.floor(now / 5200) % ATTRACT_MAPS.length;
+      const mapKey = ATTRACT_MAPS[mapIndex];
+      if (selectedMap !== mapKey) selectedMap = mapKey;
+      ensureSelectedMapBuilt();
+      const map = MAP_DATA[selectedMap];
+      const bounds = map.bounds;
+      const center = new THREE.Vector3((bounds.minX + bounds.maxX) * 0.5, 1.8, (bounds.minZ + bounds.maxZ) * 0.5);
+      const spanX = bounds.maxX - bounds.minX;
+      const spanZ = bounds.maxZ - bounds.minZ;
+      const radius = Math.max(spanX, spanZ) * (selectedMap === "city" ? 0.62 : 0.54);
+      const orbit = now * 0.00022;
+      camera.far = selectedMap === "city" ? 360 : 180;
+      camera.updateProjectionMatrix();
+      camera.position.set(center.x + Math.sin(orbit) * radius, selectedMap === "city" ? 54 : 24, center.z + Math.cos(orbit) * radius);
+      camera.lookAt(center.x, selectedMap === "strengthPit" ? -1.2 : center.y, center.z);
+      return true;
+    }
 
     function isMapBoundaryName(name = "") {
       return /\b(north|south|east|west) (wall|fence)$/i.test(String(name));
@@ -1581,13 +1666,110 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       });
     }
 
+    function buildPowerStation() {
+      const z = POWER_STATION_CENTER_Z;
+      const stationFloorMat = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, map: floorTileTexture, roughness: 0.82, metalness: 0.0 });
+      const trackBedMat = new THREE.MeshStandardMaterial({ color: 0x252a31, map: asphaltTexture, roughness: 0.94, metalness: 0.0 });
+      const yellowMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.52, metalness: 0.02, emissive: 0x3f2b00, emissiveIntensity: 0.05 });
+      const pillarMat = new THREE.MeshStandardMaterial({ color: 0xb4233b, roughness: 0.52, metalness: 0.12 });
+      const metalMat = new THREE.MeshStandardMaterial({ color: 0x46515f, roughness: 0.45, metalness: 0.54 });
+      const railMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.34, metalness: 0.78 });
+      const lightMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0xf8fafc, emissiveIntensity: 1.15, roughness: 0.34 });
+      const trainMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.48, metalness: 0.22 });
+      const trainWindowMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, emissive: 0x2563eb, emissiveIntensity: 0.28, roughness: 0.2 });
+      const headlightMat = new THREE.MeshStandardMaterial({ color: 0xfff7ad, emissive: 0xfff7ad, emissiveIntensity: 1.9, roughness: 0.2 });
+
+      addVisualFloor("power station platform", 86, 40, new THREE.Vector3(0, 0.012, z - 22), stationFloorMat);
+      addVisualFloor("power station track bed", 86, 28, new THREE.Vector3(0, -0.42, z + 24), trackBedMat);
+      addStaticBox("power station north wall", new THREE.Vector3(88, 14, 0.8), new THREE.Vector3(0, 7, z - 43), wallMat);
+      addStaticBox("power station south fence", new THREE.Vector3(88, 3.6, 0.7), new THREE.Vector3(0, 1.8, z + 42), metalMat);
+      addStaticBox("power station west wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(-43, 6.5, z + 1), wallMat);
+      addStaticBox("power station east wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(43, 6.5, z + 1), wallMat);
+      addRoof("power station arched roof", new THREE.Vector3(88, 0.55, 118), new THREE.Vector3(0, 15.2, z + 1));
+
+      addTrackMark("power station yellow safety strip", new THREE.Vector3(82, 0.09, 1.6), new THREE.Vector3(0, 0.09, z - 2.2), 0xfacc15);
+      addTrackMark("power station rear yellow strip", new THREE.Vector3(82, 0.07, 0.8), new THREE.Vector3(0, 0.075, z - 36.5), 0xfacc15);
+
+      [-30, -15, 0, 15, 30].forEach((x, index) => {
+        addStaticBox(`power station pillar ${index + 1}`, new THREE.Vector3(1.25, 12, 1.25), new THREE.Vector3(x, 6, z - 10), pillarMat);
+        addStaticBox(`power station beam ${index + 1}`, new THREE.Vector3(1.1, 1.1, 42), new THREE.Vector3(x, 11.6, z + 6), pillarMat);
+        const light = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.18, 0.42), lightMat);
+        light.position.set(x, 9.2, z - 5.2);
+        scene.add(light);
+        const point = new THREE.PointLight(0xf8fafc, 0.75, 18, 1.5);
+        point.position.set(x, 8.3, z - 4.6);
+        scene.add(point);
+      });
+
+      [-1, 1].forEach((side) => {
+        const railZ = z + 18 + side * 4.2;
+        addStaticBox(`power station rail blocker ${side > 0 ? "south" : "north"}`, new THREE.Vector3(82, 0.28, 0.24), new THREE.Vector3(0, -0.02, railZ), railMat);
+        for (let x = -38; x <= 38; x += 4) {
+          addTrackMark(`power station sleeper ${side}-${x}`, new THREE.Vector3(0.42, 0.08, 9.2), new THREE.Vector3(x, -0.16, z + 20.1), 0x5b4636);
+        }
+      });
+
+      addStaticBox("power station raised walkway", new THREE.Vector3(31, 1.1, 9), new THREE.Vector3(24, 4.15, z - 31), obstacleMat);
+      addStaticBox("power station walkway rail north", new THREE.Vector3(31, 1.4, 0.28), new THREE.Vector3(24, 5.2, z - 35.5), metalMat);
+      addStaticBox("power station walkway rail south", new THREE.Vector3(31, 1.4, 0.28), new THREE.Vector3(24, 5.2, z - 26.5), metalMat);
+      addStaticRamp("power station west stair ramp", new THREE.Vector3(7, 0.34, 16), new THREE.Vector3(5, 2.05, z - 28.8), -0.26, stationFloorMat);
+      for (let i = 0; i < 9; i += 1) {
+        addTrackMark(`power station stair tread ${i + 1}`, new THREE.Vector3(7.2, 0.09, 0.56), new THREE.Vector3(5, 0.32 + i * 0.44, z - 36 + i * 1.35), 0xcbd5e1);
+      }
+
+      const kiosk = addStaticBox("power station power kiosk", new THREE.Vector3(6, 5, 2), new THREE.Vector3(-35, 2.5, z - 33), obstacleMat);
+      kiosk.mesh.material = [
+        obstacleMat, obstacleMat, obstacleMat, obstacleMat,
+        new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: 0x2563eb, emissiveIntensity: 0.35, roughness: 0.5 }),
+        obstacleMat
+      ];
+      addStaticBox("power station bench", new THREE.Vector3(9, 0.45, 1.4), new THREE.Vector3(-18, 1.05, z - 30), metalMat);
+      addStaticBox("power station bench back", new THREE.Vector3(9, 1.1, 0.28), new THREE.Vector3(-18, 1.55, z - 31), metalMat);
+
+      PVP_MAP_CONFIG.powerStation.spawnSlots.forEach(([x, zOffset]) => {
+        const marker = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.5, 24), new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide, transparent: true, opacity: 0.7 }));
+        marker.rotation.x = -Math.PI / 2;
+        marker.position.set(x, 0.045, z + zOffset);
+        scene.add(marker);
+      });
+
+      [[-28, 0.7, z - 18], [-10, 0.7, z - 34], [12, 0.7, z - 12], [28, 0.7, z - 32]].forEach((point, index) => {
+        createMovableBox(new THREE.Vector3(...point), index % 2 ? 0xef4444 : 0x2563eb);
+      });
+
+      stationTrainGroup = new THREE.Group();
+      stationTrainGroup.name = "power station train hazard";
+      const trainBody = new THREE.Mesh(new THREE.BoxGeometry(34, 4.2, 8.4), trainMat);
+      trainBody.position.y = 1.35;
+      trainBody.castShadow = true;
+      trainBody.receiveShadow = true;
+      stationTrainGroup.add(trainBody);
+      [-9, 0, 9].forEach((x) => {
+        const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(5, 1.35, 0.12), trainWindowMat);
+        windowMesh.position.set(x, 2.1, -4.27);
+        stationTrainGroup.add(windowMesh);
+      });
+      [-1, 1].forEach((side) => {
+        const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 10), headlightMat);
+        headlight.position.set(17.2, 1.75, side * 2.35);
+        stationTrainGroup.add(headlight);
+        const glow = new THREE.PointLight(0xfff7ad, 1.1, 18, 1.2);
+        glow.position.copy(headlight.position);
+        stationTrainGroup.add(glow);
+      });
+      stationTrainGroup.position.set(-130, 0.38, z + 20.5);
+      stationTrainGroup.visible = false;
+      scene.add(stationTrainGroup);
+    }
+
     const mapBuilders = {
       hub: buildHub,
       speedTrack: buildSuperSpeedTrack,
       minionArena: buildMinionArena,
       strengthPit: buildStrengthPit,
       city: buildPowerCity,
-      pvpArena: buildPvpArena
+      pvpArena: buildPvpArena,
+      powerStation: buildPowerStation
     };
 
     function ensureSelectedMapBuilt() {
@@ -1624,6 +1806,25 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       sun.shadow.camera.far = cityActive ? 190 : 64;
       renderer.shadowMap.needsUpdate = true;
       builtMap = selectedMap;
+    }
+
+    function deactivateMapsForMenu() {
+      const trackedRaycasts = new Set([...mapResources.values()].flatMap((resource) => resource.raycastTargets));
+      mapResources.forEach((resource) => {
+        resource.objects.forEach((object) => { object.visible = false; });
+        resource.bodies.forEach((body) => {
+          if (world.bodies.includes(body)) world.removeBody(body);
+        });
+      });
+      for (let index = raycastTargets.length - 1; index >= 0; index -= 1) {
+        if (trackedRaycasts.has(raycastTargets[index])) raycastTargets.splice(index, 1);
+      }
+      if (stationTrainGroup) stationTrainGroup.visible = false;
+      selectedMap = null;
+      builtMap = null;
+      scene.background = new THREE.Color(0xf7f9fc);
+      scene.fog = new THREE.Fog(0xf7f9fc, 38, 76);
+      renderer.shadowMap.needsUpdate = true;
     }
 
     // Player body is a stable sphere for smooth movement; the visible mesh is a simple third-person avatar.
@@ -2440,7 +2641,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         });
         rememberRoomPlayer({ id: packet.id, username: localUsername, icon: localPlayerIcon, power: gameStarted ? selectedPower : "choosing", map: gameStarted ? selectedMap : "lobby", health: playerHealth });
         packet.entities?.filter((entry) => entry.map === selectedMap).forEach((entry) => applyEntitySnapshot(entry.snapshot));
-        if (selectedMap === "pvpArena") placeAtPvpSpawn(packet.id);
+        packet.hazards?.forEach((hazard) => applyMapHazard(hazard));
+        if (isPvpMap()) placeAtPvpSpawn(packet.id);
       }
       if (packet.type === "player-joined" || packet.type === "player-updated") {
         rememberRoomPlayer(packet.player);
@@ -2509,13 +2711,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           if (remote) remote.group.visible = true;
         }
       }
+      if (packet.type === "map-hazard") applyMapHazard(packet);
     }
 
     function placeAtPvpSpawn(id) {
+      const config = PVP_MAP_CONFIG[selectedMap] || PVP_MAP_CONFIG.pvpArena;
       let hash = 0;
       for (const char of String(id)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-      const [x, z] = PVP_SPAWN_SLOTS[hash % PVP_SPAWN_SLOTS.length];
-      playerBody.position.set(x, 1.2, PVP_CENTER_Z + z);
+      const [x, z] = config.spawnSlots[hash % config.spawnSlots.length];
+      playerBody.position.set(x, 1.2, config.centerZ + z);
       playerBody.velocity.set(0, 0, 0);
       playerBody.angularVelocity.set(0, 0, 0);
       playerBody.force.set(0, 0, 0);
@@ -2523,24 +2727,26 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function updatePvpArenaSafety(now) {
-      if (selectedMap !== "pvpArena" || !gameStarted) return;
-      if (playerBody.position.y < -5 || Math.abs(playerBody.position.x) > 45 || Math.abs(playerBody.position.z - PVP_CENTER_Z) > 45) {
+      if (!isPvpMap() || !gameStarted) return;
+      const config = PVP_MAP_CONFIG[selectedMap];
+      if (playerBody.position.y < -8 || Math.abs(playerBody.position.x) > config.safetyRadius || Math.abs(playerBody.position.z - config.centerZ) > config.safetyRadius) {
         placeAtPvpSpawn(multiplayerClient?.id || localUsername);
         showMessage("Returned to a PvP respawn point", 1000);
         return;
       }
+      if (!config.jumpPads.length) return;
       if (now < pvpJumpPadCooldownUntil || playerBody.position.y > 1.15 || playerBody.velocity.y > 2) return;
-      const pad = PVP_JUMP_PADS.find(([x, z]) => Math.hypot(playerBody.position.x - x, playerBody.position.z - (PVP_CENTER_Z + z)) <= 2.25);
+      const pad = config.jumpPads.find(([x, z]) => Math.hypot(playerBody.position.x - x, playerBody.position.z - (config.centerZ + z)) <= 2.25);
       if (!pad) return;
       playerBody.velocity.y = Math.max(playerBody.velocity.y, 18);
       playerBody.wakeUp();
       pvpJumpPadCooldownUntil = now + 900;
-      spawnRing(new THREE.Vector3(pad[0], 0.1, PVP_CENTER_Z + pad[1]), 0x38bdf8, 0.5, 2.6, 0.42);
+      spawnRing(new THREE.Vector3(pad[0], 0.1, config.centerZ + pad[1]), 0x38bdf8, 0.5, 2.6, 0.42);
       playSfx("megaLeap");
     }
 
     function updateStrengthThrownContacts() {
-      if (selectedMap !== "pvpArena" || !multiplayerClient?.id || grabbedById || pvpRespawnAt) return;
+      if (!isPvpMap() || !multiplayerClient?.id || grabbedById || pvpRespawnAt) return;
       const now = performance.now();
       movableBoxes.forEach((box, index) => {
         if (!box.networkThrowAttackerId || box.networkThrowAttackerId === multiplayerClient.id || box.networkContactSent || now > (box.networkThrowExpiresAt || 0)) return;
@@ -2559,7 +2765,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function resolveRemotePlayerCollision() {
-      if (selectedMap !== "pvpArena" || !onlineMode || !multiplayerClient?.id || phaseBootsActive() || grabbedById || pvpRespawnAt) return;
+      if (!isPvpMap() || !onlineMode || !multiplayerClient?.id || phaseBootsActive() || grabbedById || pvpRespawnAt) return;
       const now = performance.now();
       for (const remote of remotePlayers.values()) {
         if (remote.health <= 0 || !remote.group.visible) continue;
@@ -2856,7 +3062,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function markPvpCombat(duration = 10000) {
-      if (!onlineMode || selectedMap !== "pvpArena") return;
+      if (!onlineMode || !isPvpMap()) return;
       pvpCombatUntil = Math.max(pvpCombatUntil, performance.now() + duration);
     }
 
@@ -3096,6 +3302,61 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (index >= 0) activeFloorWebs.splice(index, 1);
       disposeVisual(trap.net);
       networkFloorWebs.delete(trapId);
+    }
+
+    function applyMapHazard(packet) {
+      if (packet.map !== "powerStation") return;
+      const previous = stationTrainState;
+      stationTrainState = {
+        ...packet,
+        warningAt: networkTimeToPerformance(packet.warningAt),
+        activeFrom: networkTimeToPerformance(packet.activeFrom),
+        activeUntil: networkTimeToPerformance(packet.activeUntil),
+        nextArrivalAt: networkTimeToPerformance(packet.nextArrivalAt),
+      };
+      if (selectedMap !== "powerStation") return;
+      if (packet.phase === "warning" && stationTrainAnnouncedEvent !== packet.eventId) {
+        stationTrainAnnouncedEvent = packet.eventId;
+        showMessage("Station warning: train arriving on the tracks", 2200);
+        playSfx("cooldownDeny");
+      }
+      if (packet.phase === "active" && previous?.phase !== "active") {
+        showMessage("Train passing!", 1200);
+        playSfx("flightTurbo");
+      }
+    }
+
+    function updatePowerStationTrain(now) {
+      if (!stationTrainGroup) return;
+      if (selectedMap !== "powerStation" || !stationTrainState) {
+        stationTrainGroup.visible = false;
+        return;
+      }
+      const direction = Number(stationTrainState.direction) >= 0 ? 1 : -1;
+      const warningAt = Number(stationTrainState.warningAt) || 0;
+      const activeFrom = Number(stationTrainState.activeFrom) || 0;
+      const activeUntil = Number(stationTrainState.activeUntil) || 0;
+      let visible = false;
+      let x = -140 * direction;
+      if (now >= warningAt && now < activeFrom) {
+        const progress = THREE.MathUtils.clamp((now - warningAt) / Math.max(1, activeFrom - warningAt), 0, 1);
+        x = THREE.MathUtils.lerp(-138 * direction, -70 * direction, progress);
+        visible = true;
+      } else if (now >= activeFrom && now <= activeUntil) {
+        const progress = THREE.MathUtils.clamp((now - activeFrom) / Math.max(1, activeUntil - activeFrom), 0, 1);
+        x = THREE.MathUtils.lerp(-78 * direction, 78 * direction, progress);
+        visible = true;
+      }
+      stationTrainGroup.visible = visible;
+      if (!visible) return;
+      stationTrainGroup.position.x = x;
+      stationTrainGroup.rotation.y = direction > 0 ? 0 : Math.PI;
+      if (now >= stationTrainPulseAt) {
+        stationTrainPulseAt = now + (stationTrainState.phase === "active" ? 160 : 420);
+        const trackPoint = new THREE.Vector3(0, 0.08, POWER_STATION_CENTER_Z + 20.5);
+        const phasePulse = 0.45 + Math.sin(now * 0.018) * 0.2;
+        spawnRing(trackPoint, stationTrainState.phase === "active" ? 0xef4444 : 0xfacc15, 0.35 + phasePulse * 0.15, 1.45 + phasePulse * 0.3, 0.14);
+      }
     }
 
     function applyPvpRespawn(packet) {
@@ -4217,7 +4478,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const worldHit = worldHits[0] || null;
       const blockingWorldHit = worldHits.find((hit) => ["obstacle", "movableBox", "roof"].includes(hit.target.userData.type));
       let remoteHit = null;
-      if (selectedMap === "pvpArena") {
+      if (isPvpMap()) {
         remotePlayers.forEach((remote) => {
           if (remote.health <= 0 || !remote.group.visible) return;
           const bodyPoints = [0.35, 0.82, 1.28, 1.72].map((height) => remote.group.position.clone().add(new THREE.Vector3(0, height, 0)));
@@ -4423,7 +4684,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
             .find((item) => item.target?.visible !== false);
           if (worldHit) closest = { distance: worldHit.distance, point: worldHit.point.clone(), object: worldHit.target, face: worldHit.face };
 
-          if (selectedMap === "pvpArena") {
+          if (isPvpMap()) {
             remotePlayers.forEach((remote) => {
               if (remote.health <= 0 || !remote.group.visible) return;
               const center = remote.group.position.clone().add(new THREE.Vector3(0, 0.82, 0));
@@ -4786,7 +5047,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         targetDummy.body.angularVelocity.set(0, 0, 0);
       }
       playSfx("speedKick");
-      showMessage(targetDummy || selectedMap === "pvpArena" ? "Fast Kick Combo" : "Fast Kick Combo missed");
+      showMessage(targetDummy || isPvpMap() ? "Fast Kick Combo" : "Fast Kick Combo missed");
 
       [0, 115, 230, 345].forEach((delay, index) => {
         setTimeout(() => {
@@ -4871,7 +5132,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function findRemoteCombatTarget(origin, forward, maxDistance = 17, minDot = 0.42) {
-      if (selectedMap !== "pvpArena") return null;
+      if (!isPvpMap()) return null;
       let best = null;
       let bestScore = Infinity;
       remotePlayers.forEach((remote) => {
@@ -4893,7 +5154,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function findDirectRemoteRayTarget(maxDistance = 58, hitRadius = 0.82, blockerDistance = Infinity) {
-      if (selectedMap !== "pvpArena") return null;
+      if (!isPvpMap()) return null;
       const aimOrigin = raycaster.ray.origin.clone();
       const aimDirection = raycaster.ray.direction.clone().normalize();
       let best = null;
@@ -5069,7 +5330,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return false;
       }
       const hit = centerRaycast(46);
-      const remoteTarget = selectedMap === "pvpArena"
+      const remoteTarget = isPvpMap()
         ? findRemoteCombatTarget(threeFromCannon(playerBody.position), getCameraForward(true), 46, 0.88)
         : null;
       if ((!hit || (hit.target.userData.type !== "dummy" && hit.target.userData.type !== "movableBox")) && !remoteTarget) {
@@ -5216,7 +5477,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           bestScore = score;
         }
       });
-      if (selectedMap === "pvpArena") {
+      if (isPvpMap()) {
         remotePlayers.forEach((remote) => {
           if (remote.health <= 0) return;
           const offset = remote.group.position.clone().sub(origin);
@@ -6499,6 +6760,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function updateCamera() {
+      if (!gameStarted) {
+        playerGroup.visible = false;
+        return;
+      }
       if (localDefeat) {
         updateDefeatCamera();
         return;
@@ -7136,7 +7401,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       updateDefeatEffects(now);
       updateStrengthThrownContacts();
       updatePvpArenaSafety(now);
-      updateCamera();
+      updatePowerStationTrain(now);
+      const attractPreviewActive = updateAttractPreview(now);
+      if (!attractPreviewActive) updateCamera();
       syncVisuals();
       animatePlayer(delta);
       updateMultiplayer(now, delta);
@@ -7229,7 +7496,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       startOverlay.style.display = "none";
       playerBody.position.set(map.spawn.x, map.spawn.y, map.spawn.z);
       playerBody.velocity.set(0, 0, 0);
-      if (selectedMap === "pvpArena") placeAtPvpSpawn(multiplayerClient?.id || localUsername);
+      if (isPvpMap()) placeAtPvpSpawn(multiplayerClient?.id || localUsername);
       cameraYaw = map.yaw;
       cameraPitch = 0.23;
       cameraDistance = selectedMap === "city" ? 10.2 : selectedMap === "speedTrack" ? 9.2 : selectedMap === "minionArena" || selectedMap === "strengthPit" ? 8.4 : 7.2;
@@ -7408,7 +7675,39 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       document.querySelector('[data-progress="map"]').classList.toggle("active", choosingMap);
     }
 
-    startOverlay.addEventListener("pointerdown", startMenuMusic, { once: true });
+    startOverlay.addEventListener("pointerdown", () => {
+      if (startMenuEntered) startMenuMusic();
+    }, { once: true });
+    startIntroButton?.addEventListener("click", () => {
+      if (startMenuEntered) return;
+      startMenuEntered = true;
+      playSfx("gameStart");
+      startMenuMusic();
+      startOverlay.classList.add("menuStarted");
+      menuRoot.hidden = false;
+      menuRoot.classList.add("menuPreparing");
+      deactivateMapsForMenu();
+      const from = startIntroTitle?.getBoundingClientRect();
+      const to = menuTitle?.getBoundingClientRect();
+      if (from && to && from.width > 0 && from.height > 0) {
+        const scale = THREE.MathUtils.clamp(to.width / from.width, 0.35, 1);
+        startIntroTitleBlock.style.setProperty("--title-dx", `${to.left - from.left}px`);
+        startIntroTitleBlock.style.setProperty("--title-dy", `${to.top - from.top}px`);
+        startIntroTitleBlock.style.setProperty("--title-scale", String(scale));
+        requestAnimationFrame(() => {
+          startIntro.classList.add("leaving");
+          startIntroTitleBlock.classList.add("moving");
+        });
+      } else {
+        startIntro.classList.add("leaving");
+      }
+      window.setTimeout(() => {
+        startIntro.hidden = true;
+        menuRoot.classList.remove("menuPreparing");
+        menuRoot.classList.add("menuReveal");
+        soloModeButton.focus();
+      }, 660);
+    });
 
     function cleanUsername(value) {
       return String(value || "").replace(/[^a-zA-Z0-9 _-]/g, "").trim().slice(0, 18);
