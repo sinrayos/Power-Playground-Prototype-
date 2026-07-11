@@ -1,4 +1,7 @@
-const DEFAULT_SERVER = "wss://power-playground-multiplayer.algomezg29.workers.dev";
+const requestedServer = new URLSearchParams(window.location.search).get("multiplayer");
+const DEFAULT_SERVER = /^wss?:\/\/[^\s]+$/i.test(requestedServer || "")
+  ? requestedServer
+  : "wss://power-playground-multiplayer.algomezg29.workers.dev";
 
 export function normalizeRoomCode(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);

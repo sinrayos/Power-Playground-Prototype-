@@ -1,6 +1,12 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const POWER_DATA = {
+  training: {
+    name: "Training Runner",
+    color: 0xf8fafc,
+    speed: 6.2,
+    help: "Movement only. Stand on a glowing queue pad to enter a Duel queue."
+  },
   speed: {
     name: "Super Speed Guy",
     color: 0xffea00,
@@ -103,5 +109,14 @@ export const MAP_DATA = {
     minY: -1.2,
     onlineOnly: true,
     bounds: { minX: -43, maxX: 43, minZ: 724, maxZ: 842 }
+  },
+  duelLobby: {
+    name: "Duels Lobby",
+    spawn: new THREE.Vector3(0, 1.2, 915),
+    yaw: Math.PI,
+    minY: 0.74,
+    onlineOnly: true,
+    duelLobby: true,
+    bounds: { minX: -42, maxX: 42, minZ: 900, maxZ: 968 }
   }
 };

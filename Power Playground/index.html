@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-  <link rel="stylesheet" href="./src/styles.css?v=20260710-power-station" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260711-duels" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -61,20 +61,28 @@
           <button id="onlineModeButton" class="modeChoice" type="button"><b>Online</b><span>Join a room, see your friends, and enter PvP.</span></button>
         </div>
         <div id="onlineLobby" hidden>
-          <div id="roomControls">
+          <section id="onlineModeChooser" class="onlineModeChooser" aria-labelledby="onlineModeTitle">
+            <div><span>Online rules</span><h3 id="onlineModeTitle">Choose an online mode</h3></div>
+            <div class="onlineModeCards">
+              <button type="button" data-online-mode="hangout"><b>Hangout</b><span>Social free-play on classic maps. Combat damage is off.</span></button>
+              <button type="button" data-online-mode="pvp"><b>PvP</b><span>Open combat on every map with full abilities and respawns.</span></button>
+              <button type="button" data-online-mode="duels"><b>Duels</b><span>Queue for server-run first-to-five competitive matches.</span></button>
+            </div>
+          </section>
+          <div id="roomControls" hidden>
             <label for="roomCodeInput">Room code</label>
             <input id="roomCodeInput" type="text" maxlength="8" inputmode="text" autocomplete="off" placeholder="NEW ROOM" aria-describedby="roomHint" />
             <button id="newRoomButton" type="button">New code</button>
             <button id="connectRoomButton" type="button">Connect</button>
             <small id="roomHint">Enter the same code as your friends.</small>
           </div>
-          <div class="lobbyConnection"><span id="lobbyConnectionDot"></span><strong id="lobbyConnectionText">Not connected</strong></div>
-          <section class="lobbyRosterPanel" aria-labelledby="lobbyRosterTitle">
+          <div class="lobbyConnection" hidden><span id="lobbyConnectionDot"></span><strong id="lobbyConnectionText">Not connected</strong></div>
+          <section class="lobbyRosterPanel" aria-labelledby="lobbyRosterTitle" hidden>
             <div><span>Room leaderboard</span><strong id="lobbyPlayerCount">0 connected</strong></div>
             <div id="lobbyRoster"><p>Connect to see who is here.</p></div>
             <p id="lobbyPlayerDetail">Click a username to see their Power Guy and map.</p>
           </section>
-          <button id="continueOnlineButton" type="button" disabled>Connect to continue</button>
+          <button id="continueOnlineButton" type="button" disabled hidden>Connect to continue</button>
         </div>
       </section>
 
@@ -204,10 +212,26 @@
     </section>
   </div>
   <aside id="playerList" hidden aria-label="Server player list">
-    <header><strong>Players</strong><span id="playerListCount">1</span></header>
+    <header><strong>Players</strong><span id="playerListMode">Session</span><span id="playerListCount">1</span></header>
     <div id="playerListRows"></div>
-    <small>Tab to close</small>
+    <small>Release Tab to close</small>
   </aside>
+  <section id="duelHud" hidden aria-label="Duel score">
+    <div id="duelTeamLeft" class="duelTeamSide"></div>
+    <div class="duelRoundClock"><strong id="duelRoundLabel">ROUND 1</strong><span>FIRST TO 5</span></div>
+    <div id="duelTeamRight" class="duelTeamSide right"></div>
+  </section>
+  <div id="duelOverlay" hidden aria-live="polite">
+    <section class="duelPanel">
+      <p id="duelEyebrow">POWER PLAYGROUND DUELS</p>
+      <h2 id="duelTitle">Competitive staging</h2>
+      <p id="duelSubtitle"></p>
+      <div id="duelContent"></div>
+      <div id="duelActions"></div>
+    </section>
+  </div>
+  <div id="duelAnnouncement" hidden></div>
+  <div id="controllerHint" hidden><span id="controllerStatus">Controller connected</span><small>LS Move · RS Camera · RT Attack · LT Shift · X/Square Ability · A/Cross Jump</small></div>
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
@@ -220,12 +244,14 @@
     <div class="mobileActions" aria-label="Touch controls">
       <button id="mobilePauseButton" class="mobileButton utility" type="button" data-control="pause">Menu</button>
       <button id="mobileViewButton" class="mobileButton utility" type="button" data-control="view">View</button>
+      <button id="mobileHudButton" class="mobileButton utility" type="button" data-control="hud">Hide HUD</button>
+      <button id="mobileLeaderboardButton" class="mobileButton utility" type="button" data-control="leaderboard">Scores</button>
       <button id="mobileSprintButton" class="mobileButton" type="button" data-control="sprint">Sprint</button>
       <button id="mobileSecondaryButton" class="mobileButton" type="button" data-control="secondary">E</button>
       <button id="mobileJumpButton" class="mobileButton primary" type="button" data-control="jump">Jump</button>
       <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
     </div>
   </div>
-  <script type="module" src="./src/main.js?v=20260710-power-station"></script>
+  <script type="module" src="./src/main.js?v=20260711-duels"></script>
 </body>
 </html>
