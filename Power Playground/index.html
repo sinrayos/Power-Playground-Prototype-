@@ -60,7 +60,14 @@
           <button id="soloModeButton" class="modeChoice" type="button"><b>Solo</b><span>Choose any Power Guy and standard arena.</span></button>
           <button id="onlineModeButton" class="modeChoice" type="button"><b>Online</b><span>Join a room, see your friends, and enter PvP.</span></button>
         </div>
-        <div id="onlineLobby" hidden>
+      </section>
+
+      <section id="onlineStep" class="menuStep" aria-labelledby="onlineStepTitle" aria-hidden="true">
+        <div class="stepHeading">
+          <div><span>Online</span><h2 id="onlineStepTitle">Choose your online mode</h2></div>
+          <p>Select the rules you want, connect to a room, and see everyone on the room leaderboard.</p>
+        </div>
+        <div id="onlineLobby">
           <section id="onlineModeChooser" class="onlineModeChooser" aria-labelledby="onlineModeTitle">
             <div><span>Online rules</span><h3 id="onlineModeTitle">Choose an online mode</h3></div>
             <div class="onlineModeCards">
@@ -77,13 +84,14 @@
             <small id="roomHint">Enter the same code as your friends.</small>
           </div>
           <div class="lobbyConnection" hidden><span id="lobbyConnectionDot"></span><strong id="lobbyConnectionText">Not connected</strong></div>
-          <section class="lobbyRosterPanel" aria-labelledby="lobbyRosterTitle" hidden>
+          <section class="lobbyRosterPanel" aria-labelledby="lobbyRosterTitle">
             <div><span>Room leaderboard</span><strong id="lobbyPlayerCount">0 connected</strong></div>
             <div id="lobbyRoster"><p>Connect to see who is here.</p></div>
             <p id="lobbyPlayerDetail">Click a username to see their Power Guy and map.</p>
           </section>
           <button id="continueOnlineButton" type="button" disabled hidden>Connect to continue</button>
         </div>
+        <button id="backFromOnline" type="button">← Back to Solo / Online</button>
       </section>
 
       <section id="heroStep" class="menuStep" aria-labelledby="heroStepTitle" aria-hidden="true">
@@ -91,7 +99,11 @@
           <div><span>Step 01</span><h2 id="heroStepTitle">Choose your Power Guy</h2></div>
           <p>Hover or focus a name to reveal their playstyle. Click to lock them in.</p>
         </div>
-        <div class="cards" aria-label="Choose a Power Guy">
+        <div class="powerCategoryTabs" role="tablist" aria-label="Power Guy categories">
+          <button id="powerTabHeroes" class="active" type="button" role="tab" aria-selected="true" aria-controls="powerPageHeroes">Power Guys 01–08</button>
+          <button id="powerTabExtra" type="button" role="tab" aria-selected="false" aria-controls="powerPageExtra">Extra</button>
+        </div>
+        <div id="powerPageHeroes" class="cards powerCardPage active" role="tabpanel" aria-labelledby="powerTabHeroes">
         <button class="powerCard" data-power="speed">
           <span class="heroNumber">01</span><strong>Super Speed Guy</strong>
           <span class="heroDetails">Pure movement tech built around burst speed and instant reset angles.<small>Shift super-sprints with electric trails. Left click unleashes a fast kick combo.</small></span>
@@ -124,6 +136,12 @@
           <span class="heroNumber">08</span><strong>Spider Webs Guy</strong>
           <span class="heroDetails">A momentum fighter who makes every surface useful.<small>Swing, wall-walk, grapple obstacles, pull enemies, and lay web traps.</small></span>
         </button>
+        </div>
+        <div id="powerPageExtra" class="cards powerCardPage" role="tabpanel" aria-labelledby="powerTabExtra" hidden>
+          <button class="powerCard" data-power="training">
+            <span class="heroNumber">E-1</span><strong>Neutral Guy</strong>
+            <span class="heroDetails">A calm movement-only character for exploring and hanging out.<small>White suit, black pants, standard movement, and no combat powers.</small></span>
+          </button>
         </div>
         <button id="backToMode" type="button">← Back to Solo / Online</button>
       </section>
@@ -189,6 +207,7 @@
             <option value="robot">Robot Suit Guy</option>
             <option value="jump">Super Jump Guy</option>
             <option value="webs">Spider Webs Guy</option>
+            <option value="training">Neutral Guy</option>
           </select>
           <button id="swapPowerButton" type="button">Switch Power</button>
         </div>
@@ -253,6 +272,6 @@
       <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
     </div>
   </div>
-  <script type="module" src="./src/main.js?v=20260714-duel-lobby"></script>
+  <script type="module" src="./src/main.js?v=20260714-station-neutral"></script>
 </body>
 </html>

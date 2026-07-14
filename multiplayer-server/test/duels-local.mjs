@@ -58,9 +58,14 @@ assert.deepEqual(new Set(voting.duel.maps), new Set(["hub", "speedTrack", "minio
 assert.equal(voting.duel.players.length, 2);
 
 alpha.send({ type: "action", action: { kind: "duel-vote", map: "hub" } });
-beta.send({ type: "action", action: { kind: "duel-vote", map: "hub" } });
-const voted = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.votes?.[alpha.id] === "hub" && message.duel?.votes?.[beta.id] === "hub");
-assert.ok(voted.duel.probabilities.hub > voted.duel.probabilities.city);
+const firstVote = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.votes?.[alpha.id] === "hub");
+assert.equal(firstVote.duel.probabilities.hub, 100);
+assert.equal(firstVote.duel.probabilities.city, 0);
+beta.send({ type: "action", action: { kind: "duel-vote", map: "city" } });
+const voted = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.votes?.[beta.id] === "city");
+assert.equal(voted.duel.probabilities.hub, 50);
+assert.equal(voted.duel.probabilities.city, 50);
+assert.equal(voted.duel.probabilities.speedTrack, 0);
 
 const selecting = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.phase === "power-select", 15000);
 assert.ok(selecting.duel.map);

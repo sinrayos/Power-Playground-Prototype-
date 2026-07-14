@@ -376,6 +376,13 @@
     .powerCard[data-power="jump"] { --hero-main: #2563eb; --hero-alt: #38bdf8; }
     .powerCard[data-power="webs"] { --hero-main: #dc2626; --hero-alt: #2563eb; }
     .powerCard[data-power="webs"] .heroNumber { color: #dc2626; }
+    .powerCard[data-power="training"] { --hero-main: #f8fafc; --hero-alt: #475569; }
+    .powerCard[data-power="training"] .heroNumber { color: #475569; }
+    .powerCategoryTabs { display: flex; justify-content: center; gap: 8px; max-width: 980px; margin: 0 auto 12px; }
+    .powerCategoryTabs button { padding: 9px 15px; border: 1px solid #cbd5e1; border-radius: 999px; background: rgba(255,255,255,.76); color: #64748b; font-weight: 900; cursor: pointer; }
+    .powerCategoryTabs button:hover, .powerCategoryTabs button:focus-visible, .powerCategoryTabs button.active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; outline: none; }
+    .powerCardPage[hidden] { display: none; }
+    #powerPageExtra { grid-template-columns: minmax(230px, 1fr); max-width: 360px; }
 
     .powerCard:hover,
     .powerCard:focus-visible {
@@ -1015,7 +1022,7 @@
     .lobbyConnection { grid-column: 1; display: flex; align-items: center; gap: 8px; padding: 0 4px; color: #64748b; font-size: 11px; }
     .lobbyConnection span { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; }
     .lobbyConnection.connected span { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.14); }
-    .lobbyRosterPanel { grid-column: 2; grid-row: 1 / 3; padding: 16px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.86); }
+    .lobbyRosterPanel { grid-column: 2; grid-row: 2 / 4; padding: 16px; border: 1px solid #dbe4ef; border-radius: 12px; background: rgba(255,255,255,.86); }
     .lobbyRosterPanel > div:first-child { display: flex; justify-content: space-between; color: #64748b; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
     #lobbyRoster { display: grid; gap: 6px; max-height: 150px; margin-top: 10px; overflow: auto; }
     #lobbyRoster button { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #0f172a; text-align: left; cursor: pointer; }
@@ -1025,6 +1032,8 @@
     #lobbyPlayerDetail { min-height: 18px; padding-top: 9px; border-top: 1px solid #e2e8f0; }
     #continueOnlineButton { grid-column: 1 / -1; padding: 12px; border: 0; border-radius: 9px; background: #2563eb; color: white; font-weight: 900; cursor: pointer; }
     #continueOnlineButton:disabled { background: #cbd5e1; cursor: not-allowed; }
+    #backFromOnline { display: block; margin: 14px auto 0; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 10px; background: rgba(255,255,255,.82); color: #334155; font-weight: 850; cursor: pointer; }
+    #backFromOnline:hover, #backFromOnline:focus-visible { border-color: #2563eb; color: #1d4ed8; outline: none; }
     .mapPopulation { display: inline-flex; margin-left: auto; padding: 3px 6px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 9px; font-weight: 900; }
 
     #multiplayerStatus {

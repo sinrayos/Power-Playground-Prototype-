@@ -1,12 +1,6 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 
 export const POWER_DATA = {
-  training: {
-    name: "Neutral Guy",
-    color: 0xf8fafc,
-    speed: 6.2,
-    help: "Movement only. Stand on a glowing queue pad to enter a Duel queue."
-  },
   speed: {
     name: "Super Speed Guy",
     color: 0xffea00,
@@ -55,6 +49,12 @@ export const POWER_DATA = {
     color: 0xdc2626,
     speed: 7.5,
     help: "Space jumps; while airborne, hold Space to swing and release with momentum. Tap left click to punch. Hold left click to web-pull an enemy or player, or zip to an obstacle. E nets a target or arms a floor trap."
+  },
+  training: {
+    name: "Neutral Guy",
+    color: 0xf8fafc,
+    speed: 6.2,
+    help: "Movement-only Power Guy with a clean white suit, black pants, and no combat abilities."
   }
 };
 
@@ -108,7 +108,7 @@ export const MAP_DATA = {
     yaw: Math.PI,
     minY: -1.2,
     onlineOnly: true,
-    bounds: { minX: -43, maxX: 43, minZ: 724, maxZ: 842 }
+    bounds: { minX: -43, maxX: 124, minZ: 724, maxZ: 842 }
   },
   duelLobby: {
     name: "Duels Lobby",

@@ -1,6 +1,6 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
-import { MAP_DATA, POWER_DATA } from "./config.js?v=20260711-duels";
+import { MAP_DATA, POWER_DATA } from "./config.js?v=20260714-station-neutral";
 import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260710-pop-theme";
 import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v2";
 
@@ -239,10 +239,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const startIntroTitle = document.getElementById("startIntroTitle");
     const menuTitle = document.querySelector(".menuTitleBlock h1");
     const modeStep = document.getElementById("modeStep");
+    const onlineStep = document.getElementById("onlineStep");
     const heroStep = document.getElementById("heroStep");
     const mapStep = document.getElementById("mapStep");
     const backToHeroes = document.getElementById("backToHeroes");
     const backToMode = document.getElementById("backToMode");
+    const powerTabHeroes = document.getElementById("powerTabHeroes");
+    const powerTabExtra = document.getElementById("powerTabExtra");
+    const powerPageHeroes = document.getElementById("powerPageHeroes");
+    const powerPageExtra = document.getElementById("powerPageExtra");
     const launchTransition = document.getElementById("launchTransition");
     const launchStatus = document.getElementById("launchStatus");
     const hud = document.getElementById("hud");
@@ -269,6 +274,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const message = document.getElementById("message");
     const soloModeButton = document.getElementById("soloModeButton");
     const onlineModeButton = document.getElementById("onlineModeButton");
+    const backFromOnline = document.getElementById("backFromOnline");
     const roomControls = document.getElementById("roomControls");
     const roomCodeInput = document.getElementById("roomCodeInput");
     const newRoomButton = document.getElementById("newRoomButton");
@@ -280,6 +286,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const saveUsernameButton = document.getElementById("saveUsernameButton");
     const onlineOnlyMaps = document.querySelectorAll(".onlineOnlyMap");
     const powerSwapSelect = document.getElementById("powerSwapSelect");
+    const neutralPowerSwapOption = powerSwapSelect?.querySelector('option[value="training"]');
     const swapPowerButton = document.getElementById("swapPowerButton");
     const selectionProgress = document.getElementById("selectionProgress");
     const onlineLobby = document.getElementById("onlineLobby");
@@ -645,7 +652,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const POWER_STATION_TRAIN_PERIOD_MS = 45000;
     const POWER_STATION_TRAIN_WARNING_MS = 6500;
     const POWER_STATION_TRAIN_ACTIVE_MS = 3300;
-    const POWER_STATION_TRAIN_VISIBLE_EDGE_X = 52;
+    const POWER_STATION_TRAIN_TRAVEL_X = 155;
+    const POWER_STATION_TRAIN_HALF_LENGTH = 21.5;
+    const POWER_STATION_TRAIN_HALF_WIDTH = 4.9;
+    const POWER_STATION_TRAIN_HEIGHT = 6.9;
     const PVP_MAP_CONFIG = {
       hub: {
         centerZ: 0,
@@ -687,14 +697,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         centerZ: POWER_STATION_CENTER_Z,
         spawnSlots: [[-34, -40], [34, -40], [-26, -31], [26, -31], [-34, -20], [34, -20], [-16, -12], [16, -12]],
         jumpPads: [],
-        safetyRadius: 66
+        safetyRadius: 150
       }
     };
     let pvpJumpPadCooldownUntil = 0;
     let stationTrainGroup = null;
     let stationTrainState = null;
     let stationTrainAnnouncedEvent = null;
-    let stationTrainPulseAt = 0;
     let localTrainHitEventId = null;
     let startMenuEntered = false;
     const ATTRACT_MAPS = ["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"];
@@ -834,7 +843,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function updatePrototypePanelLabel(power) {
       const powerNumber = Math.max(1, Object.keys(POWER_DATA).indexOf(power) + 1);
-      const label = `P-${String(powerNumber).padStart(2, "0")}`;
+      const label = power === "training" ? "E-1" : `P-${String(powerNumber).padStart(2, "0")}`;
       const canvas = wallPanelTexture.image;
       paintWallPanelTexture(canvas.getContext("2d"), label);
       wallPanelTexture.needsUpdate = true;
@@ -1778,16 +1787,21 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const headlightMat = new THREE.MeshStandardMaterial({ color: 0xfff7ad, emissive: 0xfff7ad, emissiveIntensity: 1.9, roughness: 0.2 });
       const tunnelMat = new THREE.MeshStandardMaterial({ color: 0x05070b, roughness: 0.95, metalness: 0.0, emissive: 0x020617, emissiveIntensity: 0.18 });
       const tunnelFrameMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.56, metalness: 0.42 });
+      const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0xb9c2cc, map: floorTileTexture, roughness: 0.9, metalness: 0.0 });
+      const fenceMat = new THREE.MeshStandardMaterial({ color: 0x263241, roughness: 0.5, metalness: 0.6 });
+      const seatMat = new THREE.MeshStandardMaterial({ color: 0x253447, roughness: 0.62, metalness: 0.35 });
 
       addVisualFloor("power station platform", 86, 40, new THREE.Vector3(0, 0.012, z - 22), stationFloorMat);
       addVisualFloor("power station track bed", 86, 44, new THREE.Vector3(0, 0.016, z + 20), trackBedMat);
       addStaticBox("power station north wall", new THREE.Vector3(88, 14, 0.8), new THREE.Vector3(0, 7, z - 43), wallMat);
       addStaticBox("power station south fence", new THREE.Vector3(88, 3.6, 0.7), new THREE.Vector3(0, 1.8, z + 42), metalMat);
       addStaticBox("power station west wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(-43, 6.5, z + 1), wallMat);
-      addStaticBox("power station east wall", new THREE.Vector3(0.8, 13, 118), new THREE.Vector3(43, 6.5, z + 1), wallMat);
+      addStaticBox("power station east north wall", new THREE.Vector3(0.8, 13, 23), new THREE.Vector3(43, 6.5, z - 46.5), wallMat);
+      addStaticBox("power station east center wall", new THREE.Vector3(0.8, 13, 30), new THREE.Vector3(43, 6.5, z - 5), wallMat);
+      addStaticBox("power station east south wall", new THREE.Vector3(0.8, 13, 29), new THREE.Vector3(43, 6.5, z + 45.5), wallMat);
       addRoof("power station arched roof", new THREE.Vector3(88, 0.55, 118), new THREE.Vector3(0, 15.2, z + 1));
 
-      [-1, 1].forEach((side) => {
+      [-1].forEach((side) => {
         const portalX = side * 42.52;
         const portal = new THREE.Mesh(new THREE.BoxGeometry(0.22, 7.4, 20), tunnelMat);
         portal.position.set(portalX, 3.75, z + 20.5);
@@ -1807,27 +1821,43 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         scene.add(tunnelGlow);
       });
 
+      addStaticBox("power station outdoor plaza", new THREE.Vector3(78, 0.8, 59), new THREE.Vector3(83, 3.6, z - 29.5), sidewalkMat);
+      addVisualFloor("power station outdoor track bed", 81, 44, new THREE.Vector3(83.5, 0.018, z + 20), trackBedMat);
+      addVisualFloor("power station outdoor south sidewalk", 81, 18, new THREE.Vector3(83.5, 0.022, z + 51), sidewalkMat);
+      for (let step = 0; step < 9; step += 1) {
+        const height = (step + 1) * 0.45;
+        addStaticBox(`power station exit stair ${step + 1}`, new THREE.Vector3(1.95, height, 8.5), new THREE.Vector3(27.5 + step * 1.75, height / 2, z - 27.5), sidewalkMat);
+      }
+      addStaticBox("power station exit landing", new THREE.Vector3(4.2, 0.8, 8.5), new THREE.Vector3(43.2, 3.6, z - 27.5), sidewalkMat);
+      for (let step = 0; step < 9; step += 1) {
+        const height = (step + 1) * 0.45;
+        addStaticBox(`power station track stair ${step + 1}`, new THREE.Vector3(9, height, 1.95), new THREE.Vector3(83, height / 2, z + 15 - step * 1.75), sidewalkMat);
+      }
+      addStaticBox("power station exit landing rail north", new THREE.Vector3(18, 1.1, 0.3), new THREE.Vector3(51.5, 4.65, z - 32), fenceMat);
+      addStaticBox("power station exit landing rail south", new THREE.Vector3(18, 1.1, 0.3), new THREE.Vector3(51.5, 4.65, z - 23), fenceMat);
+
       addTrackMark("power station yellow safety strip", new THREE.Vector3(82, 0.09, 1.6), new THREE.Vector3(0, 0.09, z - 2.2), 0xfacc15);
       addTrackMark("power station rear yellow strip", new THREE.Vector3(82, 0.07, 0.8), new THREE.Vector3(0, 0.075, z - 36.5), 0xfacc15);
 
       [-30, -15, 0, 15, 30].forEach((x, index) => {
         addStaticBox(`power station pillar ${index + 1}`, new THREE.Vector3(1.25, 12, 1.25), new THREE.Vector3(x, 6, z - 10), pillarMat);
         addStaticBox(`power station beam ${index + 1}`, new THREE.Vector3(1.1, 1.1, 42), new THREE.Vector3(x, 11.6, z + 6), pillarMat);
+        addStaticBox(`power station light mount ${index + 1}`, new THREE.Vector3(0.18, 1.5, 0.18), new THREE.Vector3(x, 10.75, z - 5.2), metalMat);
         const light = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.18, 0.42), lightMat);
-        light.position.set(x, 9.2, z - 5.2);
+        light.position.set(x, 9.95, z - 5.2);
         scene.add(light);
         const point = new THREE.PointLight(0xf8fafc, 0.75, 18, 1.5);
-        point.position.set(x, 8.3, z - 4.6);
+        point.position.set(x, 9.65, z - 4.6);
         scene.add(point);
       });
 
       [-1, 1].forEach((side) => {
         const railZ = z + 18 + side * 4.2;
-        addStaticBox(`power station rail blocker ${side > 0 ? "south" : "north"}`, new THREE.Vector3(82, 0.28, 0.24), new THREE.Vector3(0, -0.02, railZ), railMat);
-        for (let x = -38; x <= 38; x += 4) {
-          addTrackMark(`power station sleeper ${side}-${x}`, new THREE.Vector3(0.42, 0.08, 9.2), new THREE.Vector3(x, -0.16, z + 20.1), 0x5b4636);
-        }
+        addStaticBox(`power station rail blocker ${side > 0 ? "south" : "north"}`, new THREE.Vector3(160, 0.28, 0.24), new THREE.Vector3(40, -0.02, railZ), railMat);
       });
+      for (let x = -38; x <= 120; x += 4) {
+        addTrackMark(`power station sleeper ${x}`, new THREE.Vector3(0.42, 0.08, 9.2), new THREE.Vector3(x, -0.16, z + 20.1), 0x5b4636);
+      }
 
       const kiosk = addStaticBox("power station power kiosk", new THREE.Vector3(6, 5, 2), new THREE.Vector3(-35, 2.5, z - 33), obstacleMat);
       kiosk.mesh.material = [
@@ -1835,8 +1865,45 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         new THREE.MeshStandardMaterial({ color: 0x0f172a, emissive: 0x2563eb, emissiveIntensity: 0.35, roughness: 0.5 }),
         obstacleMat
       ];
-      addStaticBox("power station bench", new THREE.Vector3(9, 0.45, 1.4), new THREE.Vector3(-18, 1.05, z - 30), metalMat);
-      addStaticBox("power station bench back", new THREE.Vector3(9, 1.1, 0.28), new THREE.Vector3(-18, 1.55, z - 31), metalMat);
+      const addBench = (name, x, y, benchZ, facing = 1) => {
+        addStaticBox(`${name} seat`, new THREE.Vector3(9, 0.45, 1.4), new THREE.Vector3(x, y + 0.65, benchZ), seatMat);
+        addStaticBox(`${name} back`, new THREE.Vector3(9, 1.25, 0.28), new THREE.Vector3(x, y + 1.25, benchZ + facing * 0.82), seatMat);
+        [-3.5, 3.5].forEach((legX, legIndex) => addStaticBox(`${name} leg ${legIndex + 1}`, new THREE.Vector3(0.35, 0.75, 0.35), new THREE.Vector3(x + legX, y + 0.3, benchZ), metalMat));
+      };
+      [-22, -7, 8].forEach((x, index) => addBench(`power station platform bench ${index + 1}`, x, 0, z - 31, -1));
+      [68, 88, 108].forEach((x, index) => addBench(`power station outdoor bench ${index + 1}`, x, 4, z - 42, -1));
+
+      const addStreetLight = (name, x, lampZ, baseY = 0) => {
+        addStaticBox(`${name} pole`, new THREE.Vector3(0.38, 7.2, 0.38), new THREE.Vector3(x, baseY + 3.6, lampZ), fenceMat);
+        addStaticBox(`${name} arm`, new THREE.Vector3(2.8, 0.28, 0.28), new THREE.Vector3(x - 1.2, baseY + 7.05, lampZ), fenceMat);
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.25, 0.75), lightMat);
+        lamp.position.set(x - 2.25, baseY + 6.85, lampZ);
+        scene.add(lamp);
+        const glow = new THREE.PointLight(0xdbeafe, 0.65, 16, 1.7);
+        glow.position.set(x - 2.25, baseY + 6.55, lampZ);
+        scene.add(glow);
+      };
+      [62, 84, 106, 120].forEach((x, index) => {
+        addStreetLight(`power station plaza light ${index + 1}`, x, z - 53, 4);
+        addStreetLight(`power station sidewalk light ${index + 1}`, x, z + 49);
+      });
+
+      const addFenceLineX = (name, fenceZ, startX, endX, baseY = 0) => {
+        const length = endX - startX;
+        addStaticBox(`${name} upper rail`, new THREE.Vector3(length, 0.22, 0.22), new THREE.Vector3((startX + endX) / 2, baseY + 2.5, fenceZ), fenceMat);
+        addStaticBox(`${name} lower rail`, new THREE.Vector3(length, 0.22, 0.22), new THREE.Vector3((startX + endX) / 2, baseY + 1.15, fenceZ), fenceMat);
+        for (let x = startX; x <= endX; x += 5) addStaticBox(`${name} post ${x}`, new THREE.Vector3(0.24, 3, 0.24), new THREE.Vector3(x, baseY + 1.5, fenceZ), fenceMat);
+      };
+      const addFenceLineZ = (name, fenceX, startZ, endZ, baseY = 0) => {
+        const length = endZ - startZ;
+        addStaticBox(`${name} upper rail`, new THREE.Vector3(0.22, 0.22, length), new THREE.Vector3(fenceX, baseY + 2.5, (startZ + endZ) / 2), fenceMat);
+        addStaticBox(`${name} lower rail`, new THREE.Vector3(0.22, 0.22, length), new THREE.Vector3(fenceX, baseY + 1.15, (startZ + endZ) / 2), fenceMat);
+        for (let fenceZ = startZ; fenceZ <= endZ; fenceZ += 5) addStaticBox(`${name} post ${fenceZ}`, new THREE.Vector3(0.24, 3, 0.24), new THREE.Vector3(fenceX, baseY + 1.5, fenceZ), fenceMat);
+      };
+      addFenceLineX("power station north border", z - 58, 44, 123, 4);
+      addFenceLineX("power station south border", z + 60, 44, 123, 0);
+      addFenceLineZ("power station east elevated border", 123, z - 58, z, 4);
+      addFenceLineZ("power station east ground border", 123, z, z + 60, 0);
 
       PVP_MAP_CONFIG.powerStation.spawnSlots.forEach(([x, zOffset]) => {
         const marker = new THREE.Mesh(new THREE.RingGeometry(1.15, 1.5, 24), new THREE.MeshBasicMaterial({ color: 0x22c55e, side: THREE.DoubleSide, transparent: true, opacity: 0.7 }));
@@ -1851,25 +1918,56 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
       stationTrainGroup = new THREE.Group();
       stationTrainGroup.name = "power station train hazard";
-      const trainBody = new THREE.Mesh(new THREE.BoxGeometry(34, 4.2, 8.4), trainMat);
-      trainBody.position.y = 1.35;
+      const trainBody = new THREE.Mesh(new THREE.BoxGeometry(42, 5.8, 9.2), trainMat);
+      trainBody.position.y = 2.6;
       trainBody.castShadow = true;
       trainBody.receiveShadow = true;
       stationTrainGroup.add(trainBody);
-      [-9, 0, 9].forEach((x) => {
-        const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(5, 1.35, 0.12), trainWindowMat);
-        windowMesh.position.set(x, 2.1, -4.27);
-        stationTrainGroup.add(windowMesh);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(42.7, 0.55, 9.65), metalMat);
+      roof.position.y = 5.72;
+      roof.castShadow = true;
+      stationTrainGroup.add(roof);
+      const lowerSkirt = new THREE.Mesh(new THREE.BoxGeometry(42.4, 0.7, 9.45), tunnelFrameMat);
+      lowerSkirt.position.y = 0.15;
+      stationTrainGroup.add(lowerSkirt);
+      [-1, 1].forEach((side) => {
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(40.8, 0.42, 0.12), yellowMat);
+        stripe.position.set(0, 1.25, side * 4.66);
+        stationTrainGroup.add(stripe);
+        [-14, -6, 6, 14].forEach((x) => {
+          const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(4.9, 1.65, 0.14), trainWindowMat);
+          windowMesh.position.set(x, 3.75, side * 4.67);
+          stationTrainGroup.add(windowMesh);
+        });
+        [-9.8, 0, 9.8].forEach((x) => {
+          const door = new THREE.Mesh(new THREE.BoxGeometry(2.7, 3.75, 0.16), metalMat);
+          door.position.set(x, 2.45, side * 4.68);
+          stationTrainGroup.add(door);
+          const doorWindow = new THREE.Mesh(new THREE.BoxGeometry(1.65, 1.25, 0.18), trainWindowMat);
+          doorWindow.position.set(x, 3.65, side * 4.78);
+          stationTrainGroup.add(doorWindow);
+        });
+      });
+      const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.15, 5.6), trainWindowMat);
+      windshield.position.set(21.08, 3.65, 0);
+      stationTrainGroup.add(windshield);
+      [-14.5, -5, 5, 14.5].forEach((x) => {
+        [-1, 1].forEach((side) => {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.5, 18), tunnelFrameMat);
+          wheel.rotation.x = Math.PI / 2;
+          wheel.position.set(x, 0.05, side * 4.25);
+          stationTrainGroup.add(wheel);
+        });
       });
       [-1, 1].forEach((side) => {
         const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 10), headlightMat);
-        headlight.position.set(17.2, 1.75, side * 2.35);
+        headlight.position.set(21.2, 2.05, side * 2.6);
         stationTrainGroup.add(headlight);
         const glow = new THREE.PointLight(0xfff7ad, 1.1, 18, 1.2);
         glow.position.copy(headlight.position);
         stationTrainGroup.add(glow);
       });
-      stationTrainGroup.position.set(-130, 0.38, z + 20.5);
+      stationTrainGroup.position.set(-POWER_STATION_TRAIN_TRAVEL_X, 0.38, z + 20.5);
       stationTrainGroup.visible = false;
       scene.add(stationTrainGroup);
     }
@@ -3023,7 +3121,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       duelOverlay.classList.remove("power-selection");
       duelEyebrow.textContent = `${duelState.mode.toUpperCase()} · MAP DRAFT`;
       duelTitle.textContent = "Vote for the battleground";
-      duelSubtitle.textContent = `Each map starts with one fair-lottery weight. Your vote adds three. ${duelSecondsRemaining()}s remaining.`;
+      duelSubtitle.textContent = `Only maps with votes enter the draw. Equal votes mean equal chances. ${duelSecondsRemaining()}s remaining.`;
       duelContent.replaceChildren();
       duelActions.replaceChildren();
       const grid = document.createElement("div");
@@ -3036,16 +3134,21 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         button.disabled = Boolean(localVote);
         const name = document.createElement("strong");
         name.textContent = MAP_DATA[mapKey]?.name || mapKey;
-        const chance = document.createElement("span");
-        chance.className = "duelChance";
-        chance.textContent = `${duelState.probabilities?.[mapKey] || 0}% chance`;
+        const probability = Number(duelState.probabilities?.[mapKey]) || 0;
         const voters = document.createElement("div");
         voters.className = "duelVoters";
         const voterPlayers = (duelState.players || []).filter((player) => duelState.votes?.[player.id] === mapKey);
         voterPlayers.forEach((player) => voters.appendChild(Object.assign(document.createElement("img"), { src: playerIconArt(player.icon), alt: player.username, title: player.username })));
         const total = document.createElement("small");
         total.textContent = `${voterPlayers.length} vote${voterPlayers.length === 1 ? "" : "s"}`;
-        button.append(name, chance, voters, total);
+        button.append(name);
+        if (probability > 0) {
+          const chance = document.createElement("span");
+          chance.className = "duelChance";
+          chance.textContent = `${probability}% chance`;
+          button.appendChild(chance);
+        }
+        button.append(voters, total);
         button.addEventListener("click", () => multiplayerClient?.sendAction({ kind: "duel-vote", map: mapKey }));
         grid.appendChild(button);
       });
@@ -3165,7 +3268,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function updateDuelUi(now = performance.now()) {
       if (!duelAnnouncement.hidden && now >= Number(duelAnnouncement.dataset.hideAt || 0)) duelAnnouncement.hidden = true;
       if (!duelState) return;
-      if (!duelOverlay.hidden && duelState.phase === "voting") duelSubtitle.textContent = `Each map starts with one fair-lottery weight. Your vote adds three. ${duelSecondsRemaining()}s remaining.`;
+      if (!duelOverlay.hidden && duelState.phase === "voting") duelSubtitle.textContent = `Only maps with votes enter the draw. Equal votes mean equal chances. ${duelSecondsRemaining()}s remaining.`;
       if (!duelOverlay.hidden && duelState.phase === "power-select") duelSubtitle.textContent = `The arena stays blurred until deployment. ${duelSecondsRemaining()}s remaining.`;
       if (!duelOverlay.hidden && duelState.phase === "intermission") duelSubtitle.textContent = `Selection closes when the next round begins in ${duelSecondsRemaining()}s.`;
       if (duelState.phase === "victory" && duelWinnerIds.length) updateDuelVictoryScene();
@@ -3996,40 +4099,25 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const serverStateCurrent = stationTrainState && now < (Number(stationTrainState.activeUntil) || 0) + 2200;
       const trainState = serverStateCurrent ? stationTrainState : predicted;
       const direction = Number(trainState.direction) >= 0 ? 1 : -1;
-      const warningAt = Number(trainState.warningAt) || predicted.warningAt;
       const activeFrom = Number(trainState.activeFrom) || predicted.activeFrom;
       const activeUntil = Number(trainState.activeUntil) || predicted.activeUntil;
-      let visible = true;
-      let x = -POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction;
-      if (now >= warningAt && now < activeFrom) {
-        const progress = THREE.MathUtils.clamp((now - warningAt) / Math.max(1, activeFrom - warningAt), 0, 1);
-        x = THREE.MathUtils.lerp(-POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction, -58 * direction, progress);
-      } else if (now >= activeFrom && now <= activeUntil) {
-        const progress = THREE.MathUtils.clamp((now - activeFrom) / Math.max(1, activeUntil - activeFrom), 0, 1);
-        x = THREE.MathUtils.lerp(-58 * direction, 58 * direction, progress);
-      } else if (now > activeUntil) {
-        x = POWER_STATION_TRAIN_VISIBLE_EDGE_X * direction;
-      }
+      const visible = now >= activeFrom && now <= activeUntil;
       stationTrainGroup.visible = visible;
       if (!visible) return;
+      const progress = THREE.MathUtils.clamp((now - activeFrom) / Math.max(1, activeUntil - activeFrom), 0, 1);
+      const x = THREE.MathUtils.lerp(-POWER_STATION_TRAIN_TRAVEL_X * direction, POWER_STATION_TRAIN_TRAVEL_X * direction, progress);
       stationTrainGroup.position.x = x;
       stationTrainGroup.rotation.y = direction > 0 ? 0 : Math.PI;
-      if (now >= stationTrainPulseAt) {
-        stationTrainPulseAt = now + (trainState.phase === "active" ? 160 : 420);
-        const trackPoint = new THREE.Vector3(0, 0.08, POWER_STATION_CENTER_Z + 20.5);
-        const phasePulse = 0.45 + Math.sin(now * 0.018) * 0.2;
-        spawnRing(trackPoint, trainState.phase === "active" ? 0xef4444 : 0xfacc15, 0.35 + phasePulse * 0.15, 1.45 + phasePulse * 0.3, 0.14);
-      }
-      applyLocalPowerStationTrainHit(trainState, direction);
+      applyLocalPowerStationTrainHit(trainState, direction, x);
     }
 
-    function applyLocalPowerStationTrainHit(trainState, direction) {
+    function applyLocalPowerStationTrainHit(trainState, direction, trainX) {
       if (onlineMode || !gameStarted || localDefeat || pvpRespawnAt || selectedMap !== "powerStation") return;
       if (trainState.phase !== "active" || localTrainHitEventId === trainState.eventId) return;
       const x = playerBody.position.x;
       const y = playerBody.position.y;
       const z = playerBody.position.z;
-      if (x < -41 || x > 41 || y < -1.2 || y > 4.8 || z < POWER_STATION_CENTER_Z + 14.2 || z > POWER_STATION_CENTER_Z + 27.3) return;
+      if (Math.abs(x - trainX) > POWER_STATION_TRAIN_HALF_LENGTH || y < -1.2 || y > POWER_STATION_TRAIN_HEIGHT || Math.abs(z - (POWER_STATION_CENTER_Z + 20.5)) > POWER_STATION_TRAIN_HALF_WIDTH) return;
       localTrainHitEventId = trainState.eventId;
       playerHealth = 0;
       playerDamageFlash = 0.85;
@@ -8201,7 +8289,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       renderPlayerList();
       powerName.textContent = data.name;
       const map = MAP_DATA[selectedMap];
-      powerHelp.textContent = `${map.name}. ${data.help} ${power === "training" ? "WASD or left stick moves. No powers in the lobby." : "WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V cycles camera views. Esc pauses."}`;
+      powerHelp.textContent = `${map.name}. ${data.help} ${power === "training" ? selectedMap === "duelLobby" ? "Stand on a glowing pad to queue. No powers in the lobby." : "WASD or left stick moves. Neutral Guy has no attacks or abilities." : "WASD move. Left Ctrl toggles Shift Lock. Right drag camera. V cycles camera views. Esc pauses."}`;
       hud.style.display = "block";
       if (inventoryHud) inventoryHud.style.display = power === "training" ? "none" : "block";
       renderHudCompactMode();
@@ -8320,6 +8408,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (paused) {
         if (document.pointerLockElement) document.exitPointerLock();
         resumeButton.focus();
+        if (neutralPowerSwapOption) {
+          const neutralAllowed = !onlineMode || onlinePlayMode !== "duels";
+          neutralPowerSwapOption.hidden = !neutralAllowed;
+          neutralPowerSwapOption.disabled = !neutralAllowed;
+        }
         powerSwapSelect.value = selectedPower;
         mapSwapSelect.value = selectedMap;
       } else {
@@ -8362,6 +8455,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         setPaused(false);
         return;
       }
+      if (nextPower === "training" && onlineMode && onlinePlayMode === "duels") {
+        showMessage("Neutral Guy cannot be selected during Duels.", 1500);
+        setPaused(false);
+        return;
+      }
       if (!POWER_DATA[nextPower] || nextPower === selectedPower) {
         setPaused(false);
         return;
@@ -8396,18 +8494,42 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     let menuLaunching = false;
 
+    function showPowerCardPage(page = "heroes") {
+      const showExtra = page === "extra" && (!onlineMode || onlinePlayMode !== "duels");
+      powerPageHeroes.hidden = showExtra;
+      powerPageExtra.hidden = !showExtra;
+      powerTabHeroes.classList.toggle("active", !showExtra);
+      powerTabHeroes.setAttribute("aria-selected", String(!showExtra));
+      powerTabExtra.classList.toggle("active", showExtra);
+      powerTabExtra.setAttribute("aria-selected", String(showExtra));
+    }
+
+    function updateNeutralGuyAvailability() {
+      const allowed = !onlineMode || onlinePlayMode !== "duels";
+      powerTabExtra.hidden = !allowed;
+      if (!allowed) showPowerCardPage("heroes");
+      if (neutralPowerSwapOption) {
+        neutralPowerSwapOption.hidden = !allowed;
+        neutralPowerSwapOption.disabled = !allowed;
+      }
+    }
+
     function setMenuStep(step) {
       const choosingMode = step === "mode";
+      const choosingOnline = step === "online";
       const choosingMap = step === "map";
       modeStep.classList.toggle("active", choosingMode);
       modeStep.setAttribute("aria-hidden", String(!choosingMode));
-      heroStep.classList.toggle("active", !choosingMode && !choosingMap);
-      heroStep.setAttribute("aria-hidden", String(choosingMode || choosingMap));
+      onlineStep.classList.toggle("active", choosingOnline);
+      onlineStep.setAttribute("aria-hidden", String(!choosingOnline));
+      heroStep.classList.toggle("active", !choosingMode && !choosingOnline && !choosingMap);
+      heroStep.setAttribute("aria-hidden", String(choosingMode || choosingOnline || choosingMap));
       mapStep.classList.toggle("active", choosingMap);
       mapStep.setAttribute("aria-hidden", String(!choosingMap));
-      selectionProgress.hidden = choosingMode;
-      document.querySelector('[data-progress="hero"]').classList.toggle("active", !choosingMode && !choosingMap);
+      selectionProgress.hidden = choosingMode || choosingOnline;
+      document.querySelector('[data-progress="hero"]').classList.toggle("active", !choosingMode && !choosingOnline && !choosingMap);
       document.querySelector('[data-progress="map"]').classList.toggle("active", choosingMap);
+      if (!choosingMode && !choosingOnline && !choosingMap) updateNeutralGuyAvailability();
     }
 
     startOverlay.addEventListener("pointerdown", () => {
@@ -8500,6 +8622,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       onlineOnlyMaps.forEach((button) => { button.hidden = true; });
       if (enabled && !roomCodeInput.value) roomCodeInput.value = createRoomCode();
       if (enabled) rememberRoomCode(roomCodeInput.value);
+      if (enabled) lobbyRoster?.closest(".lobbyRosterPanel")?.removeAttribute("hidden");
+      updateNeutralGuyAvailability();
       renderMapPopulation();
       playSfx("menuTap");
     }
@@ -8507,6 +8631,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function selectOnlinePlayMode(mode) {
       if (!["hangout", "pvp", "duels"].includes(mode)) return;
       onlinePlayMode = mode;
+      updateNeutralGuyAvailability();
       document.querySelectorAll("[data-online-mode]").forEach((button) => button.classList.toggle("chosen", button.dataset.onlineMode === mode));
       roomControls.hidden = false;
       lobbyConnection.hidden = false;
@@ -8531,7 +8656,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       setLobbyConnection(false);
       setMenuStep("hero");
     });
-    onlineModeButton.addEventListener("click", () => setOnlineMode(true));
+    onlineModeButton.addEventListener("click", () => {
+      setOnlineMode(true);
+      setMenuStep("online");
+    });
+    backFromOnline.addEventListener("click", () => {
+      setOnlineMode(false);
+      setMenuStep("mode");
+      playSfx("menuTap");
+    });
+    powerTabHeroes.addEventListener("click", () => showPowerCardPage("heroes"));
+    powerTabExtra.addEventListener("click", () => showPowerCardPage("extra"));
     document.querySelectorAll("[data-online-mode]").forEach((button) => button.addEventListener("click", () => selectOnlinePlayMode(button.dataset.onlineMode)));
     connectRoomButton.addEventListener("click", () => connectToMultiplayer(true));
     continueOnlineButton.addEventListener("click", () => {
@@ -8554,6 +8689,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     document.querySelectorAll(".powerCard").forEach((button) => {
       button.addEventListener("click", () => {
         if (menuLaunching) return;
+        if (button.dataset.power === "training" && onlineMode && onlinePlayMode === "duels") return;
         startMenuMusic();
         playSfx("menuTap");
         menuSelectedPower = button.dataset.power;

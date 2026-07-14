@@ -27,7 +27,7 @@ const DEFEAT_RESPAWN_DELAY = 4400;
 const FLIGHT_STRIKE_COOLDOWN = 12000;
 const MAP_BOUNDS = {
   hub: [-23.6, 23.6, -23.6, 23.6], speedTrack: [-56.5, 56.5, 70.5, 161.5], minionArena: [-35.5, 35.5, 184.5, 253.5],
-  strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688], powerStation: [-43, 43, 724, 842],
+  strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688], powerStation: [-43, 124, 724, 842],
 };
 const GAME_MAPS = ["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"];
 const ONLINE_MODES = new Set(["hangout", "pvp", "duels"]);
@@ -50,14 +50,10 @@ const POWER_STATION_CENTER_Z = 786;
 const TRAIN_PERIOD_MS = 45000;
 const TRAIN_WARNING_MS = 6500;
 const TRAIN_ACTIVE_MS = 3300;
-const TRAIN_PATH = {
-  minX: -41,
-  maxX: 41,
-  minY: -1.2,
-  maxY: 4.8,
-  minZ: POWER_STATION_CENTER_Z + 14.2,
-  maxZ: POWER_STATION_CENTER_Z + 27.3,
-};
+const TRAIN_TRAVEL_X = 155;
+const TRAIN_HALF_LENGTH = 21.5;
+const TRAIN_HALF_WIDTH = 4.9;
+const TRAIN_HEIGHT = 6.9;
 function isCombatPlayer(player) {
   return player?.mode === "pvp" || (player?.mode === "duels" && Boolean(player.matchId));
 }
@@ -537,20 +533,15 @@ export class GameRoom {
     if (!match) return {};
     const voteCounts = Object.fromEntries(GAME_MAPS.map((map) => [map, 0]));
     for (const map of match.votes?.values?.() || []) if (map in voteCounts) voteCounts[map] += 1;
-    const weights = Object.fromEntries(GAME_MAPS.map((map) => [map, 1 + voteCounts[map] * 3]));
-    const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
-    return Object.fromEntries(GAME_MAPS.map((map) => [map, Math.round(weights[map] / total * 1000) / 10]));
+    const total = Object.values(voteCounts).reduce((sum, count) => sum + count, 0);
+    if (!total) return Object.fromEntries(GAME_MAPS.map((map) => [map, 0]));
+    return Object.fromEntries(GAME_MAPS.map((map) => [map, Math.round(voteCounts[map] / total * 1000) / 10]));
   }
 
   chooseDuelMap(match) {
-    const probabilities = this.duelMapProbabilities(match);
-    const random = crypto.getRandomValues(new Uint32Array(1))[0] / 0xffffffff * 100;
-    let cursor = 0;
-    for (const map of GAME_MAPS) {
-      cursor += probabilities[map];
-      if (random <= cursor) return map;
-    }
-    return GAME_MAPS[GAME_MAPS.length - 1];
+    const votes = [...(match.votes?.values?.() || [])].filter((map) => GAME_MAPS.includes(map));
+    if (!votes.length) return GAME_MAPS[crypto.getRandomValues(new Uint32Array(1))[0] % GAME_MAPS.length];
+    return votes[crypto.getRandomValues(new Uint32Array(1))[0] % votes.length];
   }
 
   beginDuelPowerSelection(match, now = Date.now()) {
@@ -761,7 +752,10 @@ export class GameRoom {
     const train = this.powerStationTrainState(now);
     if (train.phase !== "active" || player.lastTrainHitId === train.eventId) return false;
     const [x, y, z] = safeVector(player.state.position);
-    if (x < TRAIN_PATH.minX || x > TRAIN_PATH.maxX || y < TRAIN_PATH.minY || y > TRAIN_PATH.maxY || z < TRAIN_PATH.minZ || z > TRAIN_PATH.maxZ) return false;
+    const progress = Math.max(0, Math.min(1, (now - train.activeFrom) / Math.max(1, train.activeUntil - train.activeFrom)));
+    const trainStartX = -TRAIN_TRAVEL_X * train.direction;
+    const trainX = trainStartX + (TRAIN_TRAVEL_X * train.direction - trainStartX) * progress;
+    if (Math.abs(x - trainX) > TRAIN_HALF_LENGTH || y < -1.2 || y > TRAIN_HEIGHT || Math.abs(z - (POWER_STATION_CENTER_Z + 20.5)) > TRAIN_HALF_WIDTH) return false;
     player.lastTrainHitId = train.eventId;
     player.health = 0;
     player.respawnAt = player.mode === "duels" ? 0 : now + DEFEAT_RESPAWN_DELAY;
