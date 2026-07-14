@@ -1321,6 +1321,10 @@
     }
     #duelOverlay[hidden] { display: none; }
     .duelPanel { box-sizing: border-box; width: min(1120px, 100%); max-height: min(88vh, 820px); padding: clamp(18px,3vw,34px); overflow: auto; border: 1px solid rgba(103,232,249,.44); border-radius: 24px; background: linear-gradient(145deg, rgba(8,17,38,.96), rgba(17,32,64,.94)); color: #f8fafc; box-shadow: 0 30px 90px rgba(0,0,0,.46), inset 0 1px rgba(255,255,255,.08); backdrop-filter: blur(18px); }
+    #duelOverlay.power-selection { background: radial-gradient(circle at 50% 42%,rgba(37,99,235,.08),rgba(3,8,20,.48)); }
+    #duelOverlay.power-selection .duelPanel { background: linear-gradient(145deg,rgba(8,17,38,.72),rgba(17,32,64,.66)); backdrop-filter: blur(28px) saturate(1.18); -webkit-backdrop-filter: blur(28px) saturate(1.18); }
+    #duelOverlay.power-selection .duelPowerGrid button { background: rgba(20,35,62,.68); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+    #duelOverlay.power-selection .duelPowerGrid img, #duelOverlay.power-selection .duelPowerGrid strong { opacity: 1; filter: none; }
     #duelEyebrow { margin: 0; color: #67e8f9; font: 900 11px/1 system-ui,sans-serif; letter-spacing: .18em; text-transform: uppercase; }
     #duelTitle { margin: 8px 0 4px; font: 950 clamp(30px,5vw,58px)/.96 system-ui,sans-serif; letter-spacing: -.045em; text-transform: uppercase; }
     #duelSubtitle { margin: 0 0 20px; color: #b9c8df; font-size: 13px; line-height: 1.5; }
@@ -1370,6 +1374,11 @@
     #controllerHint[hidden] { display: none; }
     #controllerHint span { display:block; font-weight:900; }
     #controllerHint small { color:#b9c8df; font-size:9px; }
+    #controllerCursor { position: fixed; left: 0; top: 0; z-index: 140; width: 26px; height: 26px; transform: translate(-50%,-50%); pointer-events: none; filter: drop-shadow(0 3px 6px rgba(0,0,0,.5)); }
+    #controllerCursor[hidden] { display: none; }
+    #controllerCursor::before { content:""; position:absolute; left:2px; top:1px; width:15px; height:20px; border:2px solid #071225; border-radius:3px 10px 10px 10px; background:#f8fafc; transform:rotate(-18deg); clip-path:polygon(0 0,100% 62%,60% 68%,48% 100%); }
+    #controllerCursor span { position:absolute; right:0; bottom:0; width:9px; height:9px; border:2px solid #f8fafc; border-radius:50%; background:#22d3ee; box-shadow:0 0 0 2px #071225; }
+    .controllerCursorFocus { outline: 3px solid #67e8f9 !important; outline-offset: 3px; }
 
     #playerList { width: min(680px, calc(100vw - 32px)); }
     #playerList header { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; }

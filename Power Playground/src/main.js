@@ -188,13 +188,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let onlinePlayMode = null;
     let duelState = null;
     let duelInputLocked = false;
-    let duelLobbyReturnIcon = null;
     let duelWinnerIds = [];
     let activeGamepadIndex = null;
     let gamepadWasActive = false;
     let gamepadPreviousButtons = [];
     let gamepadMoveX = 0;
     let gamepadMoveY = 0;
+    let controllerCursorX = window.innerWidth * 0.5;
+    let controllerCursorY = window.innerHeight * 0.5;
+    let controllerCursorTarget = null;
     let multiplayerClient = null;
     let multiplayerSendAt = 0;
     let entitySendAt = 0;
@@ -324,6 +326,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const duelAnnouncement = document.getElementById("duelAnnouncement");
     const controllerHint = document.getElementById("controllerHint");
     const controllerStatus = document.getElementById("controllerStatus");
+    const controllerCursor = document.getElementById("controllerCursor");
 
     const PLAYER_ICON_POWERS = ["speed", "strength", "teleport", "telekinesis", "flight", "jump", "robot", "webs", "training"];
     const PLAYER_ICON_IDS = PLAYER_ICON_POWERS.flatMap((power) => [`portrait-${power}`, `symbol-${power}`]);
@@ -393,7 +396,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function buildIconPicker(host) {
       if (!host) return;
-      PLAYER_ICON_IDS.filter((iconId) => !iconId.endsWith("-training")).forEach((iconId) => {
+      PLAYER_ICON_IDS.forEach((iconId) => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "iconChoice";
@@ -420,6 +423,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         ["strength", "12%", "54%", "70px", "-20deg", ".3", ""],
         ["teleport", "94%", "12%", "124px", "-12deg", ".22", "large"],
         ["webs", "30%", "34%", "86px", "14deg", ".26", ""],
+        ["training", "70%", "82%", "92px", "-9deg", ".34", ""],
       ];
       layout.forEach(([power, x, y, size, rot, opacity, extra]) => {
         const image = document.createElement("img");
@@ -1870,85 +1874,217 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       scene.add(stationTrainGroup);
     }
 
+    function drawDuelLobbyLabel(sprite, text, color = sprite?.userData.labelColor || "#ffffff") {
+      const context = sprite?.userData.labelContext;
+      const canvas = sprite?.userData.labelCanvas;
+      if (!context || !canvas) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.beginPath();
+      context.fillStyle = "rgba(26, 35, 49, .94)";
+      context.roundRect(8, 8, canvas.width - 16, canvas.height - 16, 22);
+      context.fill();
+      context.strokeStyle = color;
+      context.lineWidth = 5;
+      context.stroke();
+      context.fillStyle = "#ffffff";
+      let fontSize = 52;
+      do {
+        context.font = `900 ${fontSize}px system-ui`;
+        fontSize -= 2;
+      } while (fontSize > 20 && context.measureText(text).width > canvas.width - 58);
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(text, canvas.width / 2, canvas.height / 2, canvas.width - 52);
+      sprite.userData.labelColor = color;
+      sprite.material.map.needsUpdate = true;
+    }
+
+    function createPhysicalDuelSign(texture, position, scale, renderOrder) {
+      const backplate = new THREE.Mesh(
+        new THREE.BoxGeometry(scale[0] + 0.28, scale[1] + 0.24, 0.22),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.44, metalness: 0.42, emissive: 0x071225, emissiveIntensity: 0.18 })
+      );
+      backplate.position.copy(position);
+      backplate.position.z += 0.1;
+      backplate.castShadow = true;
+      backplate.receiveShadow = true;
+      scene.add(backplate);
+      const surface = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false, side: THREE.FrontSide })
+      );
+      surface.position.copy(position);
+      surface.position.z -= 0.025;
+      surface.scale.set(scale[0], scale[1], 1);
+      surface.rotation.y = Math.PI;
+      surface.renderOrder = renderOrder;
+      scene.add(surface);
+      return surface;
+    }
+
     function createDuelLobbyLabel(text, position, color = "#ffffff", scale = [7.5, 1.8]) {
       const canvas = document.createElement("canvas");
       canvas.width = 512;
       canvas.height = 128;
       const context = canvas.getContext("2d");
-      context.fillStyle = "rgba(8, 15, 32, .88)";
-      context.roundRect(8, 8, 496, 112, 22);
-      context.fill();
-      context.strokeStyle = color;
-      context.lineWidth = 5;
-      context.stroke();
-      context.fillStyle = "#ffffff";
-      context.font = "900 54px system-ui";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(text, 256, 64);
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
-      sprite.position.copy(position);
-      sprite.scale.set(scale[0], scale[1], 1);
+      const sprite = createPhysicalDuelSign(texture, position, scale, 90);
       sprite.userData.labelCanvas = canvas;
       sprite.userData.labelContext = context;
       sprite.userData.labelColor = color;
       scene.add(sprite);
+      drawDuelLobbyLabel(sprite, text, color);
       return sprite;
     }
 
     function updateDuelLobbyLabel(sprite, text, color = sprite?.userData.labelColor || "#ffffff") {
-      const context = sprite?.userData.labelContext;
-      if (!context) return;
-      context.clearRect(0, 0, 512, 128);
-      context.fillStyle = "rgba(8, 15, 32, .88)";
-      context.roundRect(8, 8, 496, 112, 22);
-      context.fill();
-      context.strokeStyle = color;
-      context.lineWidth = 5;
-      context.stroke();
-      context.fillStyle = "#ffffff";
-      context.font = "900 54px system-ui";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(text, 256, 64);
-      sprite.material.map.needsUpdate = true;
+      drawDuelLobbyLabel(sprite, text, color);
+    }
+
+    function createDuelQueueBoard(position, color, scale = [5.2, 2.6]) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 256;
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const board = createPhysicalDuelSign(texture, position, scale, 88);
+      board.userData.boardCanvas = canvas;
+      board.userData.boardContext = canvas.getContext("2d");
+      board.userData.boardColor = color;
+      scene.add(board);
+      return board;
+    }
+
+    function updateDuelQueueBoard(board, title, playerIds, capacity) {
+      const context = board?.userData.boardContext;
+      const canvas = board?.userData.boardCanvas;
+      if (!context || !canvas) return;
+      const signature = `${title}:${capacity}:${playerIds.join(",")}:${playerIds.map((id) => roomPlayers.get(id)?.icon || "").join(",")}`;
+      board.userData.boardSignature = signature;
+      const draw = () => {
+        if (board.userData.boardSignature !== signature) return;
+        const color = board.userData.boardColor;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.beginPath();
+        context.fillStyle = "rgba(30, 41, 59, .94)";
+        context.roundRect(10, 10, 492, 236, 24);
+        context.fill();
+        context.strokeStyle = color;
+        context.lineWidth = 7;
+        context.stroke();
+        context.fillStyle = "#f8fafc";
+        context.font = "900 35px system-ui";
+        context.textAlign = "left";
+        context.fillText(title, 34, 58);
+        context.fillStyle = color;
+        context.textAlign = "right";
+        context.fillText(`${playerIds.length}/${capacity}`, 478, 58);
+        const slotSize = capacity === 1 ? 98 : capacity === 2 ? 86 : 72;
+        const gap = 18;
+        const totalWidth = capacity * slotSize + Math.max(0, capacity - 1) * gap;
+        const startX = (canvas.width - totalWidth) / 2;
+        for (let index = 0; index < capacity; index += 1) {
+          const x = startX + index * (slotSize + gap);
+          const y = 91;
+          context.beginPath();
+          context.fillStyle = "rgba(148, 163, 184, .18)";
+          context.roundRect(x, y, slotSize, slotSize, 16);
+          context.fill();
+          context.strokeStyle = "rgba(255,255,255,.22)";
+          context.lineWidth = 3;
+          context.stroke();
+          const player = roomPlayers.get(playerIds[index]);
+          if (!player) continue;
+          const image = cachedPlayerIconImage(player.icon);
+          if (image.complete && image.naturalWidth) context.drawImage(image, x + 4, y + 4, slotSize - 8, slotSize - 8);
+          else image.addEventListener("load", draw, { once: true });
+          context.fillStyle = "#ffffff";
+          context.font = "800 17px system-ui";
+          context.textAlign = "center";
+          const shortName = String(player.username || "Player").slice(0, 10);
+          context.fillText(shortName, x + slotSize / 2, 214, slotSize + 12);
+        }
+        board.material.map.needsUpdate = true;
+      };
+      draw();
     }
 
     function buildDuelLobby() {
       const z = 934;
-      const floorMat = new THREE.MeshStandardMaterial({ color: 0x101a31, roughness: 0.52, metalness: 0.32 });
-      const trimMat = new THREE.MeshStandardMaterial({ color: 0x1f2d4d, roughness: 0.38, metalness: 0.5, emissive: 0x0b1630, emissiveIntensity: 0.35 });
+      const floorMat = new THREE.MeshStandardMaterial({ color: 0x677485, roughness: 0.76, metalness: 0.12 });
+      const pathMat = new THREE.MeshStandardMaterial({ color: 0xc7ced8, roughness: 0.68, metalness: 0.08 });
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x8d99a8, roughness: 0.62, metalness: 0.18 });
+      const trimMat = new THREE.MeshStandardMaterial({ color: 0x243248, roughness: 0.38, metalness: 0.5, emissive: 0x13243e, emissiveIntensity: 0.28 });
+      const seatMat = new THREE.MeshStandardMaterial({ color: 0x26364d, roughness: 0.5, metalness: 0.28 });
+      const cyanLightMat = new THREE.MeshStandardMaterial({ color: 0xe2fbff, emissive: 0x67e8f9, emissiveIntensity: 2.8, roughness: 0.2 });
       addVisualFloor("duels lobby floor", 88, 72, new THREE.Vector3(0, 0.01, z), floorMat);
+      addVisualFloor("duels lobby central path", 12, 68, new THREE.Vector3(0, 0.025, z), pathMat);
+      [-6.35, 6.35].forEach((x) => addVisualFloor("duels lobby path edge", 0.34, 68, new THREE.Vector3(x, 0.04, z), cyanLightMat));
       const floorBody = new CANNON.Body({ mass: 0, material: groundMaterial });
       floorBody.addShape(new CANNON.Box(new CANNON.Vec3(44, 0.35, 36)));
       floorBody.position.set(0, -0.35, z);
       floorBody.userData = { type: "floor", name: "duels lobby floor" };
       configureBodyCollision(floorBody, COLLISION_GROUP_FLOOR);
       world.addBody(floorBody);
-      addStaticBox("duel lobby north wall", new THREE.Vector3(88, 10, 0.8), new THREE.Vector3(0, 5, z - 36), trimMat);
-      addStaticBox("duel lobby south stage", new THREE.Vector3(88, 3, 1.2), new THREE.Vector3(0, 1.5, z + 36), trimMat);
-      addStaticBox("duel lobby west wall", new THREE.Vector3(0.8, 10, 72), new THREE.Vector3(-44, 5, z), trimMat);
-      addStaticBox("duel lobby east wall", new THREE.Vector3(0.8, 10, 72), new THREE.Vector3(44, 5, z), trimMat);
-      [-30, 0, 30].forEach((x) => addStaticBox("duel lobby light pillar", new THREE.Vector3(1.2, 7, 1.2), new THREE.Vector3(x, 3.5, z + 30), trimMat));
-      createDuelLobbyLabel("POWER PLAYGROUND // DUELS", new THREE.Vector3(0, 7.2, z + 34.8), "#67e8f9", [18, 3.2]);
-      createDuelLobbyLabel("STAND ON A PAD TO QUEUE", new THREE.Vector3(0, 4.1, z - 34.8), "#a78bfa", [13, 2.35]);
+      addStaticBox("duel lobby entrance wall", new THREE.Vector3(88, 10, 0.8), new THREE.Vector3(0, 5, z - 36), wallMat);
+      addStaticBox("duel lobby stage wall", new THREE.Vector3(88, 10, 0.8), new THREE.Vector3(0, 5, z + 36), wallMat);
+      addStaticBox("duel lobby west wall", new THREE.Vector3(0.8, 10, 72), new THREE.Vector3(-44, 5, z), wallMat);
+      addStaticBox("duel lobby east wall", new THREE.Vector3(0.8, 10, 72), new THREE.Vector3(44, 5, z), wallMat);
+      [-38, 38].forEach((x) => {
+        [z - 27, z - 9, z + 9, z + 27].forEach((pillarZ) => {
+          addStaticBox("duel lobby pillar", new THREE.Vector3(2.2, 10, 2.2), new THREE.Vector3(x, 5, pillarZ), trimMat);
+          addStaticBox("duel lobby pillar light", new THREE.Vector3(0.22, 6.5, 0.25), new THREE.Vector3(x - Math.sign(x) * 1.13, 5.2, pillarZ), cyanLightMat);
+        });
+      });
+      [z - 27, z - 9, z + 9, z + 27].forEach((beamZ) => {
+        addStaticBox("duel lobby ceiling beam", new THREE.Vector3(78, 0.7, 1.1), new THREE.Vector3(0, 10.2, beamZ), trimMat);
+        addStaticBox("duel lobby ceiling light", new THREE.Vector3(20, 0.16, 0.6), new THREE.Vector3(0, 9.82, beamZ), cyanLightMat);
+        const light = new THREE.PointLight(0xd8f8ff, 1.55, 42, 1.7);
+        light.position.set(0, 8.7, beamZ);
+        scene.add(light);
+      });
+      [-1, 1].forEach((side) => {
+        [z - 18, z + 18].forEach((seatZ) => {
+          addStaticBox("duel lobby bench seat", new THREE.Vector3(2.8, 0.6, 5.5), new THREE.Vector3(side * 42.05, 0.75, seatZ), seatMat);
+          addStaticBox("duel lobby bench back", new THREE.Vector3(0.5, 2.2, 5.5), new THREE.Vector3(side * 43.35, 1.75, seatZ), seatMat);
+        });
+      });
+      createDuelLobbyLabel("POWER PLAYGROUND // DUELS", new THREE.Vector3(0, 7.4, z + 35.4), "#67e8f9", [19, 3.05]);
+      createDuelLobbyLabel("STAND ON A TEAM PAD TO QUEUE", new THREE.Vector3(0, 4.8, z + 35.35), "#a78bfa", [16, 2.15]);
+      createDuelLobbyLabel("HIDING THE HUD IS RECOMMENDED", new THREE.Vector3(0, 2.55, z + 35.3), "#fbbf24", [14.5, 1.9]);
       Object.entries(DUEL_QUEUE_PADS).forEach(([mode, config]) => {
         const [x, padZ] = config.center;
-        const material = new THREE.MeshStandardMaterial({ color: config.color, roughness: 0.28, metalness: 0.34, emissive: config.color, emissiveIntensity: 0.42, transparent: true, opacity: 0.88 });
-        const pad = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.22, 40), material);
-        pad.position.set(x, 0.12, padZ);
-        pad.receiveShadow = true;
-        scene.add(pad);
-        const ring = new THREE.Mesh(new THREE.RingGeometry(4.15, 4.55, 40), new THREE.MeshBasicMaterial({ color: config.color, transparent: true, opacity: 0.82, side: THREE.DoubleSide }));
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(x, 0.25, padZ);
-        scene.add(ring);
-        const label = createDuelLobbyLabel(`${mode}  ·  0/${config.required}`, new THREE.Vector3(x, 2.5, padZ), `#${config.color.toString(16).padStart(6, "0")}`);
-        duelQueuePadVisuals.set(mode, { pad, ring, label, baseColor: config.color });
+        const color = `#${config.color.toString(16).padStart(6, "0")}`;
+        const padCount = mode === "1v1v1" ? 3 : 2;
+        const offsets = padCount === 3 ? [-2.45, 0, 2.45] : [-1.85, 1.85];
+        const pads = [];
+        const borders = [];
+        const boards = [];
+        const capacity = mode === "1v1v1" ? 1 : config.required / 2;
+        addStaticBox("duel queue bay backdrop", new THREE.Vector3(11.4, 5.8, 0.55), new THREE.Vector3(x, 3.15, padZ + 3.8), trimMat);
+        const modeLabel = createDuelLobbyLabel(mode.toUpperCase(), new THREE.Vector3(x, 6.15, padZ + 3.45), color, [6.2, 1.35]);
+        offsets.forEach((offset, index) => {
+          const padWidth = padCount === 3 ? 2.15 : 3.25;
+          const material = new THREE.MeshStandardMaterial({ color: config.color, roughness: 0.3, metalness: 0.28, emissive: config.color, emissiveIntensity: 0.42, transparent: true, opacity: 0.9 });
+          const pad = new THREE.Mesh(new THREE.BoxGeometry(padWidth, 0.22, 4.7), material);
+          pad.position.set(x + offset, 0.14, padZ);
+          pad.receiveShadow = true;
+          scene.add(pad);
+          const border = new THREE.Mesh(new THREE.BoxGeometry(padWidth + 0.3, 0.08, 5), new THREE.MeshBasicMaterial({ color: config.color, transparent: true, opacity: 0.9, wireframe: true }));
+          border.position.set(x + offset, 0.29, padZ);
+          scene.add(border);
+          const boardTitle = mode === "1v1v1" ? `PLAYER ${index + 1}` : `TEAM ${index === 0 ? "A" : "B"}`;
+          const boardX = x + offset * (padCount === 3 ? 1.52 : 1.68);
+          const board = createDuelQueueBoard(new THREE.Vector3(boardX, 3.25, padZ + 3.45), color, padCount === 3 ? [3.35, 2.55] : [4.9, 2.6]);
+          updateDuelQueueBoard(board, boardTitle, [], capacity);
+          pads.push(pad);
+          borders.push(border);
+          boards.push(board);
+        });
+        duelQueuePadVisuals.set(mode, { pads, borders, boards, modeLabel, capacity, baseColor: config.color });
       });
-      const lobbyLight = new THREE.PointLight(0x67e8f9, 2.8, 90, 1.5);
+      const lobbyLight = new THREE.PointLight(0xffffff, 2.5, 100, 1.4);
       lobbyLight.position.set(0, 9, z);
       scene.add(lobbyLight);
     }
@@ -1994,8 +2130,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       activeTargets.forEach((target) => { if (!raycastTargets.includes(target)) raycastTargets.push(target); });
       const cityActive = selectedMap === "city";
       const duelLobbyActive = selectedMap === "duelLobby";
-      scene.background = new THREE.Color(cityActive ? 0x8fcdf4 : duelLobbyActive ? 0x071225 : 0xf7f9fc);
-      scene.fog = new THREE.Fog(cityActive ? 0x8fcdf4 : duelLobbyActive ? 0x071225 : 0xf7f9fc, cityActive ? 105 : duelLobbyActive ? 54 : 38, cityActive ? 255 : duelLobbyActive ? 118 : 76);
+      scene.background = new THREE.Color(cityActive ? 0x8fcdf4 : duelLobbyActive ? 0x8292a6 : 0xf7f9fc);
+      scene.fog = new THREE.Fog(cityActive ? 0x8fcdf4 : duelLobbyActive ? 0x8292a6 : 0xf7f9fc, cityActive ? 105 : duelLobbyActive ? 68 : 38, cityActive ? 255 : duelLobbyActive ? 142 : 76);
       sun.shadow.camera.far = cityActive ? 190 : 64;
       renderer.shadowMap.needsUpdate = true;
       builtMap = selectedMap;
@@ -2811,12 +2947,6 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return Math.max(0, Math.ceil(((duelState?.phaseEndsAt || 0) - Date.now()) / 1000));
     }
 
-    function setTemporaryPlayerIcon(iconId) {
-      localPlayerIcon = PLAYER_ICON_IDS.includes(iconId) ? iconId : "portrait-speed";
-      menuIconButton.replaceChildren(Object.assign(document.createElement("img"), { src: playerIconArt(localPlayerIcon), alt: "" }));
-      renderPlayerList();
-    }
-
     function enterDuelLobby(position = [0, 1.2, 915]) {
       onlineMode = true;
       onlinePlayMode = "duels";
@@ -2828,16 +2958,15 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       duelHud.hidden = true;
       duelAnnouncement.hidden = true;
       document.body.classList.remove("duel-map-blurred", "duel-victory-scene");
-      if (localPlayerIcon !== "portrait-training" && localPlayerIcon !== "symbol-training") duelLobbyReturnIcon = localPlayerIcon;
-      setTemporaryPlayerIcon("portrait-training");
+      duelOverlay.classList.remove("power-selection");
       selectedMap = "duelLobby";
       startGame("training");
       playerBody.position.set(...position);
       playerBody.previousPosition.copy(playerBody.position);
       playerBody.interpolatedPosition.copy(playerBody.position);
       playerBody.velocity.set(0, 0, 0);
-      powerName.textContent = "Training Runner";
-      powerHelp.textContent = "Movement only. Stand fully on a glowing pad to queue; step off to leave.";
+      powerName.textContent = "Neutral Guy";
+      powerHelp.textContent = "Movement only. Stand fully on a team pad to queue; step off to leave. Hiding the HUD is recommended for the clearest lobby view.";
       renderDuelQueues({});
       showMessage("Welcome to Duels. Stand on a queue pad to join.", 2600);
     }
@@ -2849,10 +2978,20 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         const visual = duelQueuePadVisuals.get(mode);
         const localQueued = state.playerIds?.includes(multiplayerClient?.id);
         if (visual) {
-          updateDuelLobbyLabel(visual.label, `${mode}  ·  ${count}/${state.required || config.required}`);
-          visual.pad.material.emissiveIntensity = localQueued ? 1.25 : count ? 0.72 : 0.42;
-          visual.ring.material.opacity = localQueued ? 1 : 0.72;
-          visual.pad.scale.y = localQueued ? 1.55 : 1;
+          updateDuelLobbyLabel(visual.modeLabel, `${mode.toUpperCase()}  ·  ${count}/${state.required || config.required}`);
+          visual.pads.forEach((pad) => {
+            pad.material.emissiveIntensity = localQueued ? 1.2 : count ? 0.7 : 0.42;
+            pad.scale.y = localQueued ? 1.45 : 1;
+          });
+          visual.borders.forEach((border) => { border.material.opacity = localQueued ? 1 : 0.72; });
+          const ids = state.playerIds || [];
+          if (mode === "1v1v1") {
+            visual.boards.forEach((board, index) => updateDuelQueueBoard(board, `PLAYER ${index + 1}`, ids.slice(index, index + 1), 1));
+          } else {
+            const capacity = visual.capacity;
+            updateDuelQueueBoard(visual.boards[0], "TEAM A", ids.slice(0, capacity), capacity);
+            updateDuelQueueBoard(visual.boards[1], "TEAM B", ids.slice(capacity, capacity * 2), capacity);
+          }
         }
         if (localQueued && state.countdownAt) showDuelAnnouncement(`MATCH FOUND · ${Math.max(1, Math.ceil((state.countdownAt - Date.now()) / 1000))}`, 1050);
       });
@@ -2881,6 +3020,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (!duelState) return;
       duelOverlay.hidden = false;
       duelOverlay.classList.remove("victory");
+      duelOverlay.classList.remove("power-selection");
       duelEyebrow.textContent = `${duelState.mode.toUpperCase()} · MAP DRAFT`;
       duelTitle.textContent = "Vote for the battleground";
       duelSubtitle.textContent = `Each map starts with one fair-lottery weight. Your vote adds three. ${duelSecondsRemaining()}s remaining.`;
@@ -2916,6 +3056,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (!duelState) return;
       duelOverlay.hidden = false;
       duelOverlay.classList.remove("victory");
+      duelOverlay.classList.add("power-selection");
       duelEyebrow.textContent = intermission ? "NEXT ROUND LOADOUT" : `${MAP_DATA[duelState.map]?.name || "Duel map"} · POWER DRAFT`;
       duelTitle.textContent = intermission ? "Change your Power Guy" : "Choose your Power Guy";
       duelSubtitle.textContent = intermission ? `Selection closes when the next round begins in ${duelSecondsRemaining()}s.` : `The arena stays blurred until deployment. ${duelSecondsRemaining()}s remaining.`;
@@ -2986,6 +3127,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       duelInputLocked = true;
       duelOverlay.hidden = false;
       duelOverlay.classList.add("victory");
+      duelOverlay.classList.remove("power-selection");
       document.body.classList.add("duel-victory-scene");
       duelEyebrow.textContent = "MATCH COMPLETE";
       duelTitle.textContent = winnerIds.includes(multiplayerClient?.id) ? "Victory" : "Match decided";
@@ -3158,7 +3300,6 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (packet.type === "duel-round-start") {
         duelState = packet.duel;
         const power = duelState.powers?.[multiplayerClient?.id] || "speed";
-        if (duelLobbyReturnIcon) setTemporaryPlayerIcon(duelLobbyReturnIcon);
         selectedMap = duelState.map;
         startGame(power);
         const spawn = packet.spawns?.[multiplayerClient?.id];
@@ -3173,6 +3314,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         clearAllDefeatEffects();
         duelOverlay.hidden = true;
         document.body.classList.remove("duel-map-blurred", "duel-victory-scene");
+        duelOverlay.classList.remove("power-selection");
         showDuelAnnouncement(packet.announcement || `ROUND ${duelState.round}`, packet.announcement === "MATCH POINT" || packet.announcement === "SUDDEN DEATH" ? 2400 : 1500);
         renderDuelHud();
       }
@@ -4698,7 +4840,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function spawnNextMinion() {
-      if (!gameStarted || selectedMap !== "minionArena" || activeMinion || minionSpawnPoints.length === 0) return;
+      if (!gameStarted || selectedMap !== "minionArena" || onlinePlayMode === "duels" || activeMinion || minionSpawnPoints.length === 0) return;
       if (minionSpawnIndex >= minionSpawnPoints.length) {
         minionSpawnIndex = 0;
         showMessage("New minion patrol cycle", 900);
@@ -6315,7 +6457,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function updateMinions(delta) {
       if (!gameStarted) return;
-      if (selectedMap === "minionArena" && !activeMinion) {
+      if (selectedMap === "minionArena" && onlinePlayMode !== "duels" && !activeMinion) {
         minionRespawnTimer = Math.max(0, minionRespawnTimer - delta);
         if (minionRespawnTimer <= 0) spawnNextMinion();
       }
@@ -8113,7 +8255,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       webPullEndsAt = 0;
       clearPlayerWebWrap();
       renderHotbar();
-      if (selectedMap === "minionArena") spawnNextMinion();
+      if (selectedMap === "minionArena" && onlinePlayMode !== "duels") spawnNextMinion();
       showMessage("Aim with the cursor. Hold right click and drag to move the camera.", 2400);
       playerBody.wakeUp();
       renderer.domElement.focus();
@@ -8794,10 +8936,47 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     }
 
     function controllerNavigateUi(direction) {
-      const buttons = [...document.querySelectorAll("#duelOverlay:not([hidden]) button:not(:disabled)")].filter((button) => button.offsetParent !== null);
+      const buttons = [...document.querySelectorAll("button:not(:disabled), select:not(:disabled), input:not(:disabled)")].filter((button) => button.offsetParent !== null);
       if (!buttons.length) return;
       const current = Math.max(0, buttons.indexOf(document.activeElement));
       buttons[(current + direction + buttons.length) % buttons.length].focus();
+    }
+
+    function controllerCursorModeActive() {
+      const menuVisible = startOverlay.style.display !== "none";
+      return menuVisible || !usernameOverlay.hidden || !pauseOverlay.hidden || !duelOverlay.hidden || flightStrikeState?.phase === "targeting";
+    }
+
+    function hideControllerCursor() {
+      controllerCursor.hidden = true;
+      controllerCursorTarget?.classList?.remove("controllerCursorFocus");
+      controllerCursorTarget = null;
+    }
+
+    function updateControllerCursor(axisX, axisY, delta) {
+      const speed = 980;
+      controllerCursorX = THREE.MathUtils.clamp(controllerCursorX + axisX * speed * delta, 10, window.innerWidth - 10);
+      controllerCursorY = THREE.MathUtils.clamp(controllerCursorY + axisY * speed * delta, 10, window.innerHeight - 10);
+      controllerCursor.hidden = false;
+      controllerCursor.style.left = `${controllerCursorX}px`;
+      controllerCursor.style.top = `${controllerCursorY}px`;
+      mouseNdc.x = controllerCursorX / window.innerWidth * 2 - 1;
+      mouseNdc.y = -(controllerCursorY / window.innerHeight * 2 - 1);
+      const nextTarget = document.elementFromPoint(controllerCursorX, controllerCursorY)?.closest?.("button:not(:disabled), select:not(:disabled), input:not(:disabled), [role='button']") || null;
+      if (nextTarget !== controllerCursorTarget) {
+        controllerCursorTarget?.classList?.remove("controllerCursorFocus");
+        controllerCursorTarget = nextTarget;
+        controllerCursorTarget?.classList?.add("controllerCursorFocus");
+        controllerCursorTarget?.focus?.({ preventScroll: true });
+      }
+    }
+
+    function activateControllerCursor() {
+      if (flightStrikeState?.phase === "targeting") {
+        chooseFlightStrikeTarget();
+        return;
+      }
+      controllerCursorTarget?.click?.();
     }
 
     function pollGamepad(delta = 1 / 60) {
@@ -8809,6 +8988,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         gamepadMoveX = 0;
         gamepadMoveY = 0;
         keys.delete("GamepadShift");
+        hideControllerCursor();
         if (gamepadWasActive) controllerHint.hidden = true;
         gamepadWasActive = false;
         gamepadPreviousButtons = [];
@@ -8828,11 +9008,19 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       gamepadMoveY = gamepadAxis(gamepad.axes[1]);
       const lookX = gamepadAxis(gamepad.axes[2], 0.2);
       const lookY = gamepadAxis(gamepad.axes[3], 0.2);
-      if (gameStarted && !gamePaused && !duelOverlay.hidden) {
+      if (controllerCursorModeActive()) {
+        updateControllerCursor(lookX, lookY, delta);
         if (pressed(14)) controllerNavigateUi(-1);
         if (pressed(15)) controllerNavigateUi(1);
-        if (pressed(0)) (document.activeElement?.closest?.("#duelOverlay") ? document.activeElement : duelOverlay.querySelector("button:not(:disabled)"))?.click?.();
-      } else if (gameStarted && !gamePaused && !duelInputLocked) {
+        if (pressed(0) || pressed(7)) activateControllerCursor();
+        if (pressed(9) && gameStarted && duelOverlay.hidden) setPaused(!gamePaused);
+        keys.delete("GamepadShift");
+        gamepadPreviousButtons = buttons;
+        if (!controllerHint.hidden && performance.now() >= Number(controllerHint.dataset.hideAt || 0)) controllerHint.hidden = true;
+        return;
+      }
+      hideControllerCursor();
+      if (gameStarted && !gamePaused && !duelInputLocked) {
         cameraYaw -= lookX * 2.7 * delta;
         cameraPitch = THREE.MathUtils.clamp(cameraPitch + lookY * 2.1 * delta, -0.72, 0.82);
         if (pressed(0)) handleMobileJumpDown();
@@ -8843,6 +9031,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (pressed(7) && gameplayInput) onAbilityDown();
       if (released(7)) onAbilityUp();
       if (buttons[6] && gameplayInput) keys.add("GamepadShift"); else keys.delete("GamepadShift");
+      if (pressed(12) && gameplayInput) toggleShiftLock();
       if (pressed(11) && gameplayInput) cycleCameraView();
       if (pressed(9) && duelOverlay.hidden) setPaused(!gamePaused);
       if (pressed(4) && gameplayInput) cycleInventoryFromController(-1);
@@ -9015,6 +9204,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_RENDER_PIXEL_RATIO));
+      controllerCursorX = THREE.MathUtils.clamp(controllerCursorX, 10, window.innerWidth - 10);
+      controllerCursorY = THREE.MathUtils.clamp(controllerCursorY, 10, window.innerHeight - 10);
     });
 
     syncVisuals();

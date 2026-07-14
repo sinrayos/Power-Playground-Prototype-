@@ -2,7 +2,7 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 
 export const POWER_DATA = {
   training: {
-    name: "Training Runner",
+    name: "Neutral Guy",
     color: 0xf8fafc,
     speed: 6.2,
     help: "Movement only. Stand on a glowing queue pad to enter a Duel queue."

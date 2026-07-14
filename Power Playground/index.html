@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-  <link rel="stylesheet" href="./src/styles.css?v=20260711-duels" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260714-duel-lobby" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -231,7 +231,8 @@
     </section>
   </div>
   <div id="duelAnnouncement" hidden></div>
-  <div id="controllerHint" hidden><span id="controllerStatus">Controller connected</span><small>LS Move · RS Camera · RT Attack · LT Shift · X/Square Ability · A/Cross Jump</small></div>
+  <div id="controllerHint" hidden><span id="controllerStatus">Controller connected</span><small>LS Move · RS Camera/Cursor · D-pad Up Shift Lock · RT Attack/Select · A/Cross Jump/Select</small></div>
+  <div id="controllerCursor" hidden aria-hidden="true"><span></span></div>
   <div id="fpsCounter" data-tier="idle" aria-label="Frames per second">-- FPS</div>
   <div id="shiftLockReticle" hidden aria-hidden="true"><span></span></div>
   <div id="message"></div>
@@ -252,6 +253,6 @@
       <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
     </div>
   </div>
-  <script type="module" src="./src/main.js?v=20260711-duels"></script>
+  <script type="module" src="./src/main.js?v=20260714-duel-lobby"></script>
 </body>
 </html>
