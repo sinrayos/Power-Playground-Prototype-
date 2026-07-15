@@ -41,6 +41,7 @@ const FIRE_RING_COOLDOWN = 8000;
 const FIRE_RING_DURATION = 5000;
 const FIRE_BURN_TICKS = 3;
 const FIRE_BURN_TICK_MS = 600;
+const FIRE_COMBO_RECOVERY = 2000;
 const MAP_BOUNDS = {
   hub: [-23.6, 23.6, -23.6, 23.6], speedTrack: [-56.5, 56.5, 70.5, 161.5], minionArena: [-35.5, 35.5, 184.5, 253.5],
   strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688], powerStation: [-43, 124, 724, 842],
@@ -176,6 +177,7 @@ export class GameRoom {
     this.webTraps = new Map();
     this.fireTrails = new Map();
     this.fireRings = new Map();
+    this.fireProjectiles = new Map();
     this.lastHazardPhase = new Map();
     this.duelQueues = new Map(Object.keys(DUEL_QUEUE_CONFIG).map((mode) => [mode, new Set()]));
     this.duelQueueCountdowns = new Map();
@@ -318,6 +320,7 @@ export class GameRoom {
         player.lastHoldEscapeTapAt = 0;
       }
       const reportedPosition = safeVector(message.state.position);
+      const previousPosition = safeVector(player.state?.position, reportedPosition);
       const statePosition = player.webTrappedUntil > Date.now() && Array.isArray(player.webTrapAnchor)
         ? player.webTrapAnchor
         : reportedPosition;
@@ -333,6 +336,8 @@ export class GameRoom {
         phaseBootsCooldownUntil: player.phaseBootsCooldownUntil || 0,
       };
       this.savePlayer(socket, player);
+      this.extendFireMovement(player, previousPosition, statePosition, now);
+      this.processFireEffects(now);
       if (player.mode === "duels" && player.map === "duelLobby" && !player.matchId) this.updateDuelQueueFromPosition(player);
       if (this.checkPowerStationTrainHit(player, now)) return;
       this.checkWebTraps(player);
@@ -469,6 +474,7 @@ export class GameRoom {
     for (const player of this.players.values()) if (player.fireBurn?.nextTickAt) candidates.push(player.fireBurn.nextTickAt);
     for (const trail of this.fireTrails.values()) candidates.push(trail.nextProcessAt || trail.expiresAt);
     for (const ring of this.fireRings.values()) candidates.push(ring.nextProcessAt || ring.expiresAt);
+    for (const projectile of this.fireProjectiles.values()) candidates.push(projectile.nextProcessAt || projectile.expiresAt);
     if (!candidates.length) return;
     const next = Math.max(Date.now() + 50, Math.min(...candidates));
     this.ctx.storage.setAlarm(next).catch(() => {});
@@ -1569,20 +1575,25 @@ export class GameRoom {
     const end = target ? [target.state.position[0], target.state.position[1] + 0.72, target.state.position[2]] : [origin[0] + direction[0] * 2.4, origin[1] + direction[1] * 2.4, origin[2] + direction[2] * 2.4];
     this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "punch", map: attacker.map, attackerId: attacker.id, origin, end });
     this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + FIRE_PUNCH_COOLDOWN });
-    if (!target || !this.applyFireDamage(attacker, target, 11, "punch", end, 3.6)) {
+    const hadCombo = Boolean(attacker.fireCombo?.count);
+    const combo = attacker.fireCombo;
+    const count = target && combo?.targetId === target.id && now <= (combo.expiresAt || 0) ? combo.count + 1 : 1;
+    if (!target || !this.applyFireDamage(attacker, target, 11, "punch", end, count >= 3 ? 7 : 3.6)) {
       attacker.fireCombo = null;
+      if (hadCombo) {
+        attacker.lastAttackAt = now + (FIRE_COMBO_RECOVERY - FIRE_PUNCH_COOLDOWN);
+        this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + FIRE_COMBO_RECOVERY });
+      }
       this.savePlayer(attacker.socket, attacker);
       this.send(attacker.socket, { type: "fire-combo", attackerId: attacker.id, count: 0, targetId: null, expiresAt: 0 });
       return;
     }
-    const combo = attacker.fireCombo;
-    const count = combo?.targetId === target.id && now <= (combo.expiresAt || 0) ? combo.count + 1 : 1;
     attacker.fireCombo = { targetId: target.id, count, expiresAt: now + FIRE_COMBO_WINDOW };
-    this.send(attacker.socket, { type: "fire-combo", attackerId: attacker.id, count, targetId: target.id, expiresAt: count >= 3 ? now + 1000 : attacker.fireCombo.expiresAt, triggered: count >= 3 });
+    this.send(attacker.socket, { type: "fire-combo", attackerId: attacker.id, count, targetId: target.id, expiresAt: count >= 3 ? now + FIRE_COMBO_RECOVERY : attacker.fireCombo.expiresAt, triggered: count >= 3 });
     if (count >= 3) {
       attacker.fireCombo = null;
-      attacker.lastAttackAt = now + (1000 - FIRE_PUNCH_COOLDOWN);
-      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + 1000 });
+      attacker.lastAttackAt = now + (FIRE_COMBO_RECOVERY - FIRE_PUNCH_COOLDOWN);
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + FIRE_COMBO_RECOVERY });
       this.applyFireBurn(attacker, target, "combo", now);
     }
     this.savePlayer(attacker.socket, attacker);
@@ -1595,15 +1606,16 @@ export class GameRoom {
     const damage = Math.round(18 + charge * 16);
     const origin = [attacker.state.position[0], attacker.state.position[1] + 0.82, attacker.state.position[2]];
     const direction = this.fireDirection(attacker, action.direction);
-    const target = this.nearestFireTarget(attacker, origin, direction, range, radius);
-    const end = target ? [target.state.position[0], target.state.position[1] + 0.72, target.state.position[2]] : [origin[0] + direction[0] * range, origin[1] + direction[1] * range, origin[2] + direction[2] * range];
-    const distance = Math.hypot(end[0] - origin[0], end[1] - origin[1], end[2] - origin[2]);
+    const end = [origin[0] + direction[0] * range, origin[1] + direction[1] * range, origin[2] + direction[2] * range];
+    const duration = Math.round(Math.max(360, Math.min(760, range / 64 * 1000)));
+    const projectileId = crypto.randomUUID();
     attacker.lastFireballAt = now;
     attacker.fireCombo = null;
     this.savePlayer(attacker.socket, attacker);
     this.send(attacker.socket, { type: "ability-cooldown", ability: "fireball", cooldownUntil: now + FIREBALL_COOLDOWN });
-    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "fireball", map: attacker.map, attackerId: attacker.id, start: origin, end, charge, duration: Math.round(Math.max(260, Math.min(700, distance / 64 * 1000))) });
-    if (target && this.applyFireDamage(attacker, target, damage, "fireball", end, 4.5)) this.applyFireBurn(attacker, target, "fireball", now);
+    this.fireProjectiles.set(projectileId, { id: projectileId, attackerId: attacker.id, map: attacker.map, start: origin, lastPoint: origin, direction, range, radius, damage, charge, startedAt: now, expiresAt: now + duration, nextProcessAt: now + 35 });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "fireball", map: attacker.map, attackerId: attacker.id, projectileId, start: origin, end, charge, duration });
+    this.scheduleDuelTick();
   }
 
   handleFireDash(attacker, action) {
@@ -1619,22 +1631,12 @@ export class GameRoom {
     direction[1] = 0;
     direction[2] /= horizontalLength;
     const origin = safeVector(attacker.state.position);
-    const bounds = MAP_BOUNDS[attacker.map];
-    const end = [origin[0] + direction[0] * FIRE_DASH_DISTANCE, origin[1], origin[2] + direction[2] * FIRE_DASH_DISTANCE];
-    if (bounds) {
-      end[0] = Math.max(bounds[0], Math.min(bounds[1], end[0]));
-      end[2] = Math.max(bounds[2], Math.min(bounds[3], end[2]));
-    }
-    const points = Array.from({ length: 17 }, (_, index) => {
-      const t = index / 16;
-      return [origin[0] + (end[0] - origin[0]) * t, origin[1], origin[2] + (end[2] - origin[2]) * t];
-    });
     const id = crypto.randomUUID();
     attacker.lastFireDashAt = now;
-    this.fireTrails.set(id, { id, attackerId: attacker.id, map: attacker.map, points, radius: 1.35, expiresAt: now + FIRE_DASH_TRAIL_DURATION, nextProcessAt: now + 100, hitIds: new Set() });
+    this.fireTrails.set(id, { id, kind: "forward", attackerId: attacker.id, map: attacker.map, points: [origin], totalDistance: 0, maxDistance: FIRE_DASH_DISTANCE + 1.5, radius: 1.35, dashEndsAt: now + FIRE_DASH_DURATION, expiresAt: now + FIRE_DASH_TRAIL_DURATION, nextProcessAt: now + 50, hitIds: new Set() });
     this.savePlayer(attacker.socket, attacker);
     this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-dash", cooldownUntil: now + FIRE_DASH_COOLDOWN });
-    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "dash", map: attacker.map, attackerId: attacker.id, points, dashEndsAt: now + FIRE_DASH_DURATION, expiresAt: now + FIRE_DASH_TRAIL_DURATION });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "dash", map: attacker.map, attackerId: attacker.id, points: [origin], direction, dashEndsAt: now + FIRE_DASH_DURATION, expiresAt: now + FIRE_DASH_TRAIL_DURATION });
     this.scheduleDuelTick();
   }
 
@@ -1647,9 +1649,12 @@ export class GameRoom {
     }
     attacker.lastFireUpDashAt = now;
     const start = safeVector(attacker.state.position);
+    const id = crypto.randomUUID();
+    this.fireTrails.set(id, { id, kind: "up", attackerId: attacker.id, map: attacker.map, points: [start], totalDistance: 0, maxDistance: 11, radius: 1.25, dashEndsAt: now + FIRE_UP_DASH_DURATION, expiresAt: now + FIRE_UP_DASH_DURATION + 80, nextProcessAt: now + 35, hitIds: new Set() });
     this.savePlayer(attacker.socket, attacker);
     this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-up-dash", cooldownUntil: now + FIRE_DASH_COOLDOWN });
     this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "up-dash", map: attacker.map, attackerId: attacker.id, start, dashEndsAt: now + FIRE_UP_DASH_DURATION });
+    this.scheduleDuelTick();
   }
 
   handleFireRing(attacker, action) {
@@ -1659,12 +1664,7 @@ export class GameRoom {
       this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-ring", cooldownUntil: (attacker.lastFireRingAt || 0) + FIRE_RING_COOLDOWN });
       return;
     }
-    const requested = safeVector(action.point, attacker.state.position);
-    const dx = requested[0] - attacker.state.position[0];
-    const dz = requested[2] - attacker.state.position[2];
-    const distance = Math.hypot(dx, dz);
-    if (distance > 14.5) return;
-    const point = [requested[0], attacker.state.position[1], requested[2]];
+    const point = safeVector(attacker.state.position);
     const bounds = MAP_BOUNDS[attacker.map];
     if (bounds) {
       point[0] = Math.max(bounds[0], Math.min(bounds[1], point[0]));
@@ -1677,6 +1677,37 @@ export class GameRoom {
     this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-ring", cooldownUntil: now + FIRE_RING_COOLDOWN });
     this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "ring", map: attacker.map, attackerId: attacker.id, ringId: id, point, radius: 5.5, expiresAt: now + FIRE_RING_DURATION });
     this.scheduleDuelTick();
+  }
+
+  extendFireMovement(player, previousPosition, reportedPosition, now = Date.now()) {
+    if (player.power !== "fire" || !Array.isArray(reportedPosition)) return;
+    for (const trail of this.fireTrails.values()) {
+      if (trail.attackerId !== player.id || now > trail.dashEndsAt || trail.totalDistance >= trail.maxDistance) continue;
+      const last = trail.points.at(-1) || safeVector(previousPosition);
+      let dx = reportedPosition[0] - last[0];
+      let dy = reportedPosition[1] - last[1];
+      let dz = reportedPosition[2] - last[2];
+      if (trail.kind === "up") {
+        if (dy <= 0) continue;
+        const horizontal = Math.hypot(dx, dz);
+        const horizontalLimit = Math.max(0.35, dy * 0.8);
+        if (horizontal > horizontalLimit) {
+          const scale = horizontalLimit / horizontal;
+          dx *= scale;
+          dz *= scale;
+        }
+      } else {
+        dy = Math.max(-0.8, Math.min(0.8, dy));
+      }
+      const distance = Math.hypot(dx, dy, dz);
+      if (distance < 0.04) continue;
+      const acceptedDistance = Math.min(distance, 4.5, trail.maxDistance - trail.totalDistance);
+      const scale = acceptedDistance / distance;
+      const next = [last[0] + dx * scale, last[1] + dy * scale, last[2] + dz * scale];
+      trail.points.push(next);
+      trail.totalDistance += acceptedDistance;
+      trail.nextProcessAt = now;
+    }
   }
 
   pointToFireTrailDistance(point, points) {
@@ -1693,6 +1724,41 @@ export class GameRoom {
   }
 
   processFireEffects(now = Date.now()) {
+    for (const [id, projectile] of this.fireProjectiles) {
+      const attacker = this.players.get(projectile.attackerId);
+      if (!attacker || attacker.health <= 0 || attacker.respawnAt || attacker.map !== projectile.map) {
+        this.fireProjectiles.delete(id);
+        continue;
+      }
+      const duration = Math.max(1, projectile.expiresAt - projectile.startedAt);
+      const progress = Math.max(0, Math.min(1, (now - projectile.startedAt) / duration));
+      const current = [
+        projectile.start[0] + projectile.direction[0] * projectile.range * progress,
+        projectile.start[1] + projectile.direction[1] * projectile.range * progress,
+        projectile.start[2] + projectile.direction[2] * projectile.range * progress,
+      ];
+      let hitTarget = null;
+      let hitDistance = Infinity;
+      for (const target of this.players.values()) {
+        if (!this.canDamage(attacker, target) || !target.state?.position) continue;
+        const targetPoint = [target.state.position[0], target.state.position[1] + 0.7, target.state.position[2]];
+        const distance = this.pointToFireTrailDistance(targetPoint, [projectile.lastPoint, current]);
+        if (distance > projectile.radius || distance >= hitDistance) continue;
+        hitTarget = target;
+        hitDistance = distance;
+      }
+      if (hitTarget) {
+        const point = [hitTarget.state.position[0], hitTarget.state.position[1] + 0.7, hitTarget.state.position[2]];
+        const verified = this.applyFireDamage(attacker, hitTarget, projectile.damage, "fireball", point, 4.5);
+        if (verified) this.applyFireBurn(attacker, hitTarget, "fireball", now);
+        this.broadcastToMap(projectile.map, { type: "fire-effect", effect: "fireball-hit", map: projectile.map, attackerId: attacker.id, projectileId: id, targetId: hitTarget.id, point, verified: Boolean(verified) });
+        this.fireProjectiles.delete(id);
+        continue;
+      }
+      projectile.lastPoint = current;
+      projectile.nextProcessAt = Math.min(projectile.expiresAt, now + 35);
+      if (progress >= 1) this.fireProjectiles.delete(id);
+    }
     for (const target of this.players.values()) {
       const burn = target.fireBurn;
       if (!burn) continue;
@@ -1726,7 +1792,8 @@ export class GameRoom {
         if (trail.hitIds.has(target.id) || !this.canDamage(attacker, target) || !target.state?.position) continue;
         if (this.pointToFireTrailDistance(target.state.position, trail.points) > trail.radius) continue;
         trail.hitIds.add(target.id);
-        if (this.applyFireDamage(attacker, target, 4, "dash-trail", target.state.position, 1.4)) this.applyFireBurn(attacker, target, "dash-trail", now);
+        const source = trail.kind === "up" ? "up-dash" : "dash-trail";
+        if (this.applyFireDamage(attacker, target, 4, source, target.state.position, 1.4)) this.applyFireBurn(attacker, target, source, now);
       }
     }
     for (const [id, ring] of this.fireRings) {
@@ -1758,6 +1825,7 @@ export class GameRoom {
   }
 
   clearFireEffectsBy(playerId) {
+    for (const [id, projectile] of this.fireProjectiles) if (projectile.attackerId === playerId) this.fireProjectiles.delete(id);
     for (const [id, trail] of this.fireTrails) if (trail.attackerId === playerId) this.fireTrails.delete(id);
     for (const [id, ring] of this.fireRings) if (ring.attackerId === playerId) this.fireRings.delete(id);
     for (const target of this.players.values()) {

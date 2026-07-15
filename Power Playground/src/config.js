@@ -54,7 +54,7 @@ export const POWER_DATA = {
     name: "Fire Guy",
     color: 0xff7a00,
     speed: 7.2,
-    help: "Tap left click for Flame Punch; hold for 1s and release a charged fireball. Shift: Flame Dash. Press Jump again in midair for an upward flame dash. E: place a damaging Fire Ring."
+    help: "Tap left click for Flame Punch; hold for 1s and release a charged fireball. Shift: Flame Dash. Press Jump again in midair for an upward flame dash. E: create a damaging Fire Ring around you."
   },
   training: {
     name: "Neutral Guy",
