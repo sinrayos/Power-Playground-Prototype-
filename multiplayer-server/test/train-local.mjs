@@ -60,14 +60,17 @@ await phase.waitFor((message) => message.type === "phase-boots-state" && message
 await shield.waitFor((message) => message.type === "shield-state" && message.id === shield.id && message.active);
 await wait(Math.max(0, activeFrom + 180 - Date.now()));
 
-const progress = Math.max(0, Math.min(1, (Date.now() - activeFrom) / Math.max(1, activeUntil - activeFrom)));
 const startX = -155 * direction;
-const trainX = startX + (155 * direction - startX) * progress;
-const state = { position: [trainX, 1.2, 806.5], forward: [direction, 0, 0], quaternion: [0, 0, 0, 1] };
-phase.send({ type: "state", state });
-inactivePhase.send({ type: "state", state });
-shield.send({ type: "state", state });
-plain.send({ type: "state", state });
+for (let sample = 0; sample < 12; sample += 1) {
+  const progress = Math.max(0, Math.min(1, (Date.now() - activeFrom) / Math.max(1, activeUntil - activeFrom)));
+  const trainX = startX + (155 * direction - startX) * progress;
+  const state = { position: [trainX, 1.2, 806.5], forward: [direction, 0, 0], quaternion: [0, 0, 0, 1] };
+  phase.send({ type: "state", state });
+  inactivePhase.send({ type: "state", state });
+  shield.send({ type: "state", state });
+  plain.send({ type: "state", state });
+  await wait(75);
+}
 
 const shieldBlock = await shield.waitFor((message) => message.type === "shield-blocked" && message.targetId === shield.id && message.power === "train");
 assert.equal(shieldBlock.health, 100, "The train must not damage an active Defense Shield");
