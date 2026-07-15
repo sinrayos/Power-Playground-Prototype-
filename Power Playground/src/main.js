@@ -673,10 +673,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let activeMinion = null;
     const duelQueuePadVisuals = new Map();
     const DUEL_QUEUE_PADS = {
-      "1v1": { center: [-18, 930], required: 2, color: 0x22d3ee },
-      "2v2": { center: [18, 930], required: 4, color: 0xa78bfa },
-      "3v3": { center: [-18, 950], required: 6, color: 0xf97316 },
-      "1v1v1": { center: [18, 950], required: 3, color: 0x34d399 }
+      "1v1": { center: [-18, 930], required: 2, slots: ["A", "B"], color: 0x22d3ee },
+      "2v2": { center: [18, 930], required: 4, slots: ["A", "B"], color: 0xa78bfa },
+      "3v3": { center: [-18, 950], required: 6, slots: ["A", "B"], color: 0xf97316 },
+      "1v1v1": { center: [18, 950], required: 3, slots: ["P1", "P2", "P3"], color: 0x34d399 }
     };
     let minionSpawnIndex = 0;
     let minionRespawnTimer = 0;
@@ -2823,7 +2823,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (outward.lengthSq() < 0.01) outward.set(random() - 0.5, 0.2, random() - 0.5);
       outward.normalize();
       const side = new THREE.Vector3(random() - 0.5, random() * 0.45, random() - 0.5).multiplyScalar(2.5);
-      body.velocity.set(outward.x * 5.8 + side.x, 5.4 + random() * 3.2 + outward.y * 1.4, outward.z * 5.8 + side.z);
+      const trainPush = effect.cause === "train" ? effect.forward.clone().multiplyScalar(20) : new THREE.Vector3();
+      body.velocity.set(outward.x * 5.8 + side.x + trainPush.x, 5.4 + random() * 3.2 + outward.y * 1.4, outward.z * 5.8 + side.z + trainPush.z);
       body.angularVelocity.set((random() - 0.5) * 11, (random() - 0.5) * 11, (random() - 0.5) * 11);
       world.addBody(body);
       const part = { name: spec.name, mesh, body };
@@ -2863,6 +2864,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         center: origin.clone().add(new THREE.Vector3(0, 0.82, 0)),
         fallback: origin.clone().add(new THREE.Vector3(0, 0.9, 0)),
         forward: new THREE.Vector3().fromArray(packet.forward || [0, 0, -1]).normalize(),
+        cause: packet.cause || null,
         startedAt: performance.now(),
         expiresAt: performance.now() + Math.max(1200, Number(packet.respawnAt || Date.now() + 4400) - Date.now()),
         impactPlayed: false,
@@ -3147,18 +3149,20 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         const localQueued = state.playerIds?.includes(multiplayerClient?.id);
         if (visual) {
           updateDuelLobbyLabel(visual.modeLabel, `${mode.toUpperCase()}  ·  ${count}/${state.required || config.required}`);
-          visual.pads.forEach((pad) => {
-            pad.material.emissiveIntensity = localQueued ? 1.2 : count ? 0.7 : 0.42;
-            pad.scale.y = localQueued ? 1.45 : 1;
+          const hasSlotData = state.slots && typeof state.slots === "object";
+          visual.pads.forEach((pad, index) => {
+            const localOnPad = hasSlotData ? state.slots[multiplayerClient?.id] === config.slots[index] : localQueued;
+            pad.material.emissiveIntensity = localOnPad ? 1.2 : count ? 0.7 : 0.42;
+            pad.scale.y = localOnPad ? 1.45 : 1;
           });
-          visual.borders.forEach((border) => { border.material.opacity = localQueued ? 1 : 0.72; });
+          visual.borders.forEach((border, index) => { border.material.opacity = hasSlotData && state.slots[multiplayerClient?.id] === config.slots[index] ? 1 : 0.72; });
           const ids = state.playerIds || [];
           if (mode === "1v1v1") {
-            visual.boards.forEach((board, index) => updateDuelQueueBoard(board, `PLAYER ${index + 1}`, ids.slice(index, index + 1), 1));
+            visual.boards.forEach((board, index) => updateDuelQueueBoard(board, `PLAYER ${index + 1}`, hasSlotData ? ids.filter((id) => state.slots[id] === config.slots[index]) : ids.slice(index, index + 1), 1));
           } else {
             const capacity = visual.capacity;
-            updateDuelQueueBoard(visual.boards[0], "TEAM A", ids.slice(0, capacity), capacity);
-            updateDuelQueueBoard(visual.boards[1], "TEAM B", ids.slice(capacity, capacity * 2), capacity);
+            updateDuelQueueBoard(visual.boards[0], "TEAM A", hasSlotData ? ids.filter((id) => state.slots[id] === "A") : ids.slice(0, capacity), capacity);
+            updateDuelQueueBoard(visual.boards[1], "TEAM B", hasSlotData ? ids.filter((id) => state.slots[id] === "B") : ids.slice(capacity, capacity * 2), capacity);
           }
         }
         if (localQueued && state.countdownAt) showDuelAnnouncement(`MATCH FOUND · ${Math.max(1, Math.ceil((state.countdownAt - Date.now()) / 1000))}`, 1050);
@@ -3775,10 +3779,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         markPvpCombat();
         playerHealth = packet.health;
         playerDamageFlash = 0.55;
-        playerForcedMotionUntil = Math.max(playerForcedMotionUntil, performance.now() + 220);
-        playerBody.velocity.x += packet.impulse[0];
-        playerBody.velocity.y += packet.impulse[1];
-        playerBody.velocity.z += packet.impulse[2];
+        if (packet.trainBlocked) {
+          playerForcedMotionUntil = Math.max(playerForcedMotionUntil, performance.now() + 700);
+          playerTumbleUntil = Math.max(playerTumbleUntil, performance.now() + 520);
+          playerBody.velocity.set(packet.impulse[0], packet.impulse[1], packet.impulse[2]);
+          playerBody.wakeUp();
+        } else {
+          playerForcedMotionUntil = Math.max(playerForcedMotionUntil, performance.now() + 220);
+          playerBody.velocity.x += packet.impulse[0];
+          playerBody.velocity.y += packet.impulse[1];
+          playerBody.velocity.z += packet.impulse[2];
+        }
         const effectPosition = Array.isArray(packet.position) ? new THREE.Vector3().fromArray(packet.position) : threeFromCannon(playerBody.position);
         if (packet.fireSource !== "burn") {
           spawnRing(groundEffectPoint(effectPosition), color, packet.slam ? 0.45 : 0.35, packet.slam ? 2.7 : 2.2, packet.slam ? 0.42 : 0.35);
@@ -4030,7 +4041,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       playSfx("shieldBlock");
       if (packet.targetId === multiplayerClient?.id) {
         playerDamageFlash = 0.18;
-        showMessage("Defense Shield blocked the hit", 750);
+        showMessage(packet.power === "train" ? "Defense Shield deflected the train" : "Defense Shield blocked the hit", packet.power === "train" ? 1200 : 750);
       }
     }
 
@@ -4245,7 +4256,26 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const x = THREE.MathUtils.lerp(-POWER_STATION_TRAIN_TRAVEL_X * direction, POWER_STATION_TRAIN_TRAVEL_X * direction, progress);
       stationTrainGroup.position.x = x;
       stationTrainGroup.rotation.y = direction > 0 ? 0 : Math.PI;
+      applyPowerStationTrainDefeatPartCollisions(trainState, direction, x);
       applyLocalPowerStationTrainHit(trainState, direction, x);
+    }
+
+    function applyPowerStationTrainDefeatPartCollisions(trainState, direction, trainX) {
+      if (trainState.phase !== "active") return;
+      defeatEffects.forEach((effect) => {
+        if (effect.map !== "powerStation") return;
+        effect.parts.forEach((part) => {
+          if (part.trainHitEventId === trainState.eventId) return;
+          const { x, y, z } = part.body.position;
+          if (Math.abs(x - trainX) > POWER_STATION_TRAIN_HALF_LENGTH || y < -1.2 || y > POWER_STATION_TRAIN_HEIGHT || Math.abs(z - (POWER_STATION_CENTER_Z + 20.5)) > POWER_STATION_TRAIN_HALF_WIDTH) return;
+          part.trainHitEventId = trainState.eventId;
+          part.body.velocity.x = direction * 34;
+          part.body.velocity.y = Math.max(part.body.velocity.y, 4.5);
+          part.body.angularVelocity.x += direction * 5;
+          part.body.angularVelocity.z += direction * 8;
+          part.body.wakeUp();
+        });
+      });
     }
 
     function applyLocalPowerStationTrainHit(trainState, direction, trainX) {
@@ -4255,7 +4285,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const y = playerBody.position.y;
       const z = playerBody.position.z;
       if (Math.abs(x - trainX) > POWER_STATION_TRAIN_HALF_LENGTH || y < -1.2 || y > POWER_STATION_TRAIN_HEIGHT || Math.abs(z - (POWER_STATION_CENTER_Z + 20.5)) > POWER_STATION_TRAIN_HALF_WIDTH) return;
+      if (phaseBootsActive()) return;
       localTrainHitEventId = trainState.eventId;
+      if (selectedPower === "robot" && robotShieldMode) {
+        playerDamageFlash = 0.22;
+        playerBody.velocity.set(direction * 30, 8, 0);
+        playerBody.wakeUp();
+        spawnRing(groundEffectPoint(threeFromCannon(playerBody.position)), POWER_DATA.robot.color, 0.55, 2.5, 0.35);
+        playSfx("shieldBlock");
+        showMessage("Defense Shield deflected the train", 1200);
+        return;
+      }
       playerHealth = 0;
       playerDamageFlash = 0.85;
       playerBody.velocity.set(direction * 30, 8, 0);
@@ -4277,6 +4317,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         orientation: playerGroup.quaternion.toArray(),
         forward: [direction, 0, 0],
         power: selectedPower,
+        cause: "train",
         seed: (0x51a710 ^ soloDefeatSequence) >>> 0,
         respawnAt: Date.now() + 4400,
       }, true);

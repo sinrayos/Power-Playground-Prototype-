@@ -10,7 +10,8 @@
     "test:remote": "node test/remote-smoke.mjs",
     "test:local:duels": "node test/duels-local.mjs",
     "test:local:rules": "node test/mode-rules-local.mjs",
-    "test:local:fire": "node test/fire-local.mjs"
+    "test:local:fire": "node test/fire-local.mjs",
+    "test:local:train": "node test/train-local.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

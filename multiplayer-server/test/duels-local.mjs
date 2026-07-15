@@ -47,15 +47,17 @@ function connect(username) {
 }
 
 const [alpha, beta] = await Promise.all([connect("Alpha"), connect("Beta")]);
-for (const [client, username] of [[alpha, "Alpha"], [beta, "Beta"]]) {
+for (const [client, username, padX] of [[alpha, "Alpha", -19.85], [beta, "Beta", -16.15]]) {
   client.send({ type: "hello", username, icon: "portrait-speed", power: "training", map: "duelLobby", mode: "duels" });
-  client.send({ type: "state", state: { position: [-18, 1.2, 930], forward: [0, 0, 1], quaternion: [0, 0, 0, 1] } });
+  client.send({ type: "state", state: { position: [padX, 1.2, 930], forward: [0, 0, 1], quaternion: [0, 0, 0, 1] } });
 }
 
 const voting = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.phase === "voting", 10000);
 assert.equal(voting.duel.mode, "1v1");
 assert.deepEqual(new Set(voting.duel.maps), new Set(["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"]));
 assert.equal(voting.duel.players.length, 2);
+assert.equal(voting.duel.teams[alpha.id], "A", "The Team A pad must assign its player to Team A");
+assert.equal(voting.duel.teams[beta.id], "B", "The Team B pad must assign its player to Team B");
 
 alpha.send({ type: "action", action: { kind: "duel-vote", map: "hub" } });
 const firstVote = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.votes?.[alpha.id] === "hub");

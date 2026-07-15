@@ -49,10 +49,10 @@ const MAP_BOUNDS = {
 const GAME_MAPS = ["hub", "speedTrack", "minionArena", "strengthPit", "city", "pvpArena", "powerStation"];
 const ONLINE_MODES = new Set(["hangout", "pvp", "duels"]);
 const DUEL_QUEUE_CONFIG = {
-  "1v1": { required: 2, center: [-18, 930] },
-  "2v2": { required: 4, center: [18, 930] },
-  "3v3": { required: 6, center: [-18, 950] },
-  "1v1v1": { required: 3, center: [18, 950] },
+  "1v1": { required: 2, center: [-18, 930], padHalfWidth: 1.82, slots: [{ id: "A", offset: -1.85, capacity: 1 }, { id: "B", offset: 1.85, capacity: 1 }] },
+  "2v2": { required: 4, center: [18, 930], padHalfWidth: 1.82, slots: [{ id: "A", offset: -1.85, capacity: 2 }, { id: "B", offset: 1.85, capacity: 2 }] },
+  "3v3": { required: 6, center: [-18, 950], padHalfWidth: 1.82, slots: [{ id: "A", offset: -1.85, capacity: 3 }, { id: "B", offset: 1.85, capacity: 3 }] },
+  "1v1v1": { required: 3, center: [18, 950], padHalfWidth: 1.23, slots: [{ id: "P1", offset: -2.45, capacity: 1 }, { id: "P2", offset: 0, capacity: 1 }, { id: "P3", offset: 2.45, capacity: 1 }] },
 };
 const DUEL_SPAWNS = {
   hub: { a: [[-19, 1.2, -18], [-15, 1.2, -18], [-11, 1.2, -18]], b: [[19, 1.2, 18], [15, 1.2, 18], [11, 1.2, 18]], ffa: [[-18, 1.2, -16], [18, 1.2, -16], [0, 1.2, 19]] },
@@ -189,7 +189,7 @@ export class GameRoom {
     for (const socket of this.ctx.getWebSockets()) {
       const player = socket.deserializeAttachment();
       if (player?.id) {
-        const restored = { mode: "hangout", damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, matchId: null, teamId: null, spawnProtectedUntil: 0, ...player, socket };
+        const restored = { mode: "hangout", damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, queueSlot: null, matchId: null, teamId: null, spawnProtectedUntil: 0, ...player, socket };
         this.players.set(player.id, restored);
         if (restored.queueMode && this.duelQueues.has(restored.queueMode)) this.duelQueues.get(restored.queueMode).add(restored.id);
       }
@@ -216,7 +216,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, fireChargeStartedAt: 0, lastFireballAt: 0, lastFireDashAt: 0, lastFireRingAt: 0, fireCombo: null, fireBurn: null, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, fireChargeStartedAt: 0, lastFireballAt: 0, lastFireDashAt: 0, lastFireRingAt: 0, fireCombo: null, fireBurn: null, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, queueSlot: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -405,11 +405,18 @@ export class GameRoom {
   }
 
   duelQueueSnapshot() {
-    return Object.fromEntries(Object.entries(DUEL_QUEUE_CONFIG).map(([mode, config]) => [mode, {
-      required: config.required,
-      playerIds: [...this.duelQueues.get(mode)].filter((id) => this.players.has(id)),
-      countdownAt: this.duelQueueCountdowns.get(mode) || 0,
-    }]));
+    return Object.fromEntries(Object.entries(DUEL_QUEUE_CONFIG).map(([mode, config]) => {
+      const slotOrder = config.slots.map((slot) => slot.id);
+      const playerIds = [...this.duelQueues.get(mode)]
+        .filter((id) => this.players.has(id))
+        .sort((a, b) => slotOrder.indexOf(this.players.get(a)?.queueSlot) - slotOrder.indexOf(this.players.get(b)?.queueSlot));
+      return [mode, {
+        required: config.required,
+        playerIds,
+        slots: Object.fromEntries(playerIds.map((id) => [id, this.players.get(id)?.queueSlot || null])),
+        countdownAt: this.duelQueueCountdowns.get(mode) || 0,
+      }];
+    }));
   }
 
   duelSnapshotFor(playerId) {
@@ -449,13 +456,27 @@ export class GameRoom {
 
   updateDuelQueueFromPosition(player) {
     const [x, _y, z] = safeVector(player.state?.position);
-    const nextMode = Object.entries(DUEL_QUEUE_CONFIG).find(([, config]) => Math.hypot(x - config.center[0], z - config.center[1]) <= 4)?.[0] || null;
-    if (player.queueMode === nextMode) return;
+    const location = Object.entries(DUEL_QUEUE_CONFIG).map(([mode, config]) => {
+      if (Math.abs(z - config.center[1]) > 2.6) return null;
+      const slot = config.slots.reduce((closest, candidate) => Math.abs(x - (config.center[0] + candidate.offset)) < Math.abs(x - (config.center[0] + closest.offset)) ? candidate : closest, config.slots[0]);
+      return Math.abs(x - (config.center[0] + slot.offset)) <= config.padHalfWidth ? { mode, slot } : null;
+    }).find(Boolean);
+    let nextMode = location?.mode || null;
+    let nextSlot = location?.slot?.id || null;
+    if (nextMode && (player.queueMode !== nextMode || player.queueSlot !== nextSlot)) {
+      const occupants = [...this.duelQueues.get(nextMode)].filter((id) => id !== player.id && this.players.get(id)?.queueSlot === nextSlot).length;
+      if (occupants >= location.slot.capacity) {
+        nextMode = null;
+        nextSlot = null;
+      }
+    }
+    if (player.queueMode === nextMode && player.queueSlot === nextSlot) return;
     if (player.queueMode && this.duelQueues.has(player.queueMode)) {
       this.duelQueues.get(player.queueMode).delete(player.id);
       if (this.duelQueues.get(player.queueMode).size < DUEL_QUEUE_CONFIG[player.queueMode].required) this.duelQueueCountdowns.delete(player.queueMode);
     }
     player.queueMode = nextMode;
+    player.queueSlot = nextSlot;
     if (nextMode) {
       for (const queue of this.duelQueues.values()) queue.delete(player.id);
       this.duelQueues.get(nextMode).add(player.id);
@@ -526,11 +547,25 @@ export class GameRoom {
   createDuelMatch(mode, playerIds, now = Date.now()) {
     const teams = {};
     const scores = {};
+    const config = DUEL_QUEUE_CONFIG[mode];
     if (mode === "1v1v1") {
-      playerIds.forEach((id, index) => { teams[id] = `P${index + 1}`; scores[`P${index + 1}`] = 0; });
+      const remaining = config.slots.map((slot) => slot.id);
+      playerIds.forEach((id) => {
+        const requested = this.players.get(id)?.queueSlot;
+        const team = remaining.includes(requested) ? requested : remaining[0];
+        teams[id] = team;
+        remaining.splice(remaining.indexOf(team), 1);
+        scores[team] = 0;
+      });
     } else {
-      const half = playerIds.length / 2;
-      playerIds.forEach((id, index) => { teams[id] = index < half ? "A" : "B"; });
+      const counts = { A: 0, B: 0 };
+      const capacity = config.required / 2;
+      playerIds.forEach((id) => {
+        const requested = this.players.get(id)?.queueSlot;
+        const team = ["A", "B"].includes(requested) && counts[requested] < capacity ? requested : counts.A < capacity ? "A" : "B";
+        teams[id] = team;
+        counts[team] += 1;
+      });
       scores.A = 0;
       scores.B = 0;
     }
@@ -545,6 +580,7 @@ export class GameRoom {
       const player = this.players.get(id);
       if (!player) continue;
       player.queueMode = null;
+      player.queueSlot = null;
       player.matchId = match.id;
       player.teamId = teams[id];
       player.mode = "duels";
@@ -733,6 +769,7 @@ export class GameRoom {
     player.matchId = null;
     player.teamId = null;
     player.queueMode = null;
+    player.queueSlot = null;
     player.health = 100;
     player.maxHealth = 100;
     player.respawnAt = 0;
@@ -806,7 +843,26 @@ export class GameRoom {
     const trainStartX = -TRAIN_TRAVEL_X * train.direction;
     const trainX = trainStartX + (TRAIN_TRAVEL_X * train.direction - trainStartX) * progress;
     if (Math.abs(x - trainX) > TRAIN_HALF_LENGTH || y < -1.2 || y > TRAIN_HEIGHT || Math.abs(z - (POWER_STATION_CENTER_Z + 20.5)) > TRAIN_HALF_WIDTH) return false;
+    if (this.isPhaseBootsActive(player, now)) return false;
     player.lastTrainHitId = train.eventId;
+    const impulseX = train.direction * 28;
+    if (this.blockDamage(null, player, "train")) {
+      this.savePlayer(player.socket, player);
+      this.broadcastToMap(player.map, {
+        type: "pvp-hit",
+        attackerId: null,
+        targetId: player.id,
+        health: player.health,
+        damage: 0,
+        impulse: [impulseX, 8, 0],
+        defeated: false,
+        respawnAt: 0,
+        power: "train",
+        trainBlocked: true,
+        position: [x, y, z],
+      });
+      return true;
+    }
     player.health = 0;
     player.respawnAt = player.mode === "duels" ? 0 : now + DEFEAT_RESPAWN_DELAY;
     player.grabbedBy = null;
@@ -820,7 +876,6 @@ export class GameRoom {
     this.releaseVictimsHeldBy(player.id);
     this.releaseWebVictimsBy(player.id);
     this.savePlayer(player.socket, player);
-    const impulseX = train.direction * 28;
     this.broadcastToMap(player.map, {
       type: "pvp-hit",
       attackerId: null,
@@ -833,7 +888,7 @@ export class GameRoom {
       power: "train",
       position: [x, y, z],
     });
-    this.announceDefeat(player, null);
+    this.announceDefeat(player, null, { cause: "train", forward: [train.direction, 0, 0] });
     return true;
   }
 
@@ -1946,7 +2001,7 @@ export class GameRoom {
     return true;
   }
 
-  announceDefeat(target, attacker) {
+  announceDefeat(target, attacker, options = {}) {
     if (target.activeDefeatId) return;
     target.defeatSequence = (Number(target.defeatSequence) || 0) + 1;
     target.activeDefeatId = `${target.id}:${target.defeatSequence}`;
@@ -1966,7 +2021,7 @@ export class GameRoom {
     this.releaseVictimsHeldBy(target.id);
     this.releaseWebVictimsBy(target.id);
     this.savePlayer(target.socket, target);
-    const forward = safeVector(target.state?.forward, [0, 0, -1]);
+    const forward = safeVector(options.forward, target.state?.forward || [0, 0, -1]);
     const quaternion = Array.isArray(target.state?.quaternion)
       ? target.state.quaternion.slice(0, 4).map((value, index) => Number.isFinite(Number(value)) ? Number(value) : (index === 3 ? 1 : 0))
       : [0, 0, 0, 1];
@@ -1982,6 +2037,7 @@ export class GameRoom {
       orientation: quaternion,
       forward,
       power: target.power,
+      cause: options.cause || null,
       seed,
       defeatedAt: Date.now(),
       respawnAt: target.respawnAt,
