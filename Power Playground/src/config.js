@@ -50,6 +50,12 @@ export const POWER_DATA = {
     speed: 7.5,
     help: "Space jumps; while airborne, hold Space to swing and release with momentum. Tap left click to punch. Hold left click to web-pull an enemy or player, or zip to an obstacle. E nets a target or arms a floor trap."
   },
+  fire: {
+    name: "Fire Guy",
+    color: 0xff7a00,
+    speed: 7.2,
+    help: "Tap left click for Flame Punch; hold for 1s and release a charged fireball. Shift: Flame Dash. Press Jump again in midair for an upward flame dash. E: place a damaging Fire Ring."
+  },
   training: {
     name: "Neutral Guy",
     color: 0xf8fafc,

@@ -413,6 +413,34 @@ export function playSfx(name) {
       playNoise(0.16, 0.033, 1200);
       playTone(760, 0.14, "sine", 0.022, 320);
     }
+    if (name === "flamePunch") {
+      playNoise(0.1, 0.035, 520);
+      playTone(190, 0.12, "sawtooth", 0.042, 75);
+      playTone(760, 0.08, "triangle", 0.024, 1280);
+    }
+    if (name === "fireballCharge") {
+      playTone(170, 0.5, "sawtooth", 0.025, 520);
+      playTone(640, 0.42, "triangle", 0.018, 1180);
+      playNoise(0.34, 0.018, 1400);
+    }
+    if (name === "fireballThrow") {
+      playNoise(0.18, 0.045, 420);
+      playTone(520, 0.2, "sawtooth", 0.04, 130);
+    }
+    if (name === "fireImpact") {
+      playNoise(0.24, 0.06, 180);
+      playTone(92, 0.22, "triangle", 0.065, 42);
+      playTone(420, 0.13, "sawtooth", 0.034, 110);
+    }
+    if (name === "flameDash") {
+      playNoise(0.28, 0.052, 700);
+      playTone(240, 0.24, "sawtooth", 0.038, 880);
+    }
+    if (name === "fireRing") {
+      playTone(110, 0.38, "sawtooth", 0.045, 360);
+      playNoise(0.4, 0.038, 340);
+      playTone(720, 0.28, "triangle", 0.024, 1180);
+    }
   } catch (error) {
     // Browsers can temporarily block audio before user interaction; gameplay continues.
   }

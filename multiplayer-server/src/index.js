@@ -9,7 +9,9 @@ const ATTACKS = {
   robot: { damage: 8, range: 55, knockback: 2.4, cone: 0.9, cooldown: 850 },
   jump: { damage: 17, range: 8, knockback: 6, radial: true, cooldown: 450 },
   webs: { damage: 10, range: 8, knockback: 3, cone: 0.05, cooldown: 650 },
+  fire: { damage: 11, range: 3.2, knockback: 3.6, cone: 0.08, cooldown: 450 },
 };
+const APPROVED_POWERS = new Set([...Object.keys(ATTACKS), "training"]);
 const TELEKINESIS_GRAB_COOLDOWN = 1500;
 const STRENGTH_PLAYER_GRAB_COOLDOWN = 1500;
 const ROBOT_SHIELD_DURATION = 5000;
@@ -21,10 +23,24 @@ const HOLD_ESCAPE_TAP_GAIN = 0.065;
 const HOLD_ESCAPE_DECAY_PER_SECOND = 0.12;
 const WEB_PULL_COOLDOWN = 1000;
 const WEB_TRAP_COOLDOWN = 5000;
-const PLAYER_ICON_PATTERN = /^(portrait|symbol)-(speed|strength|teleport|telekinesis|flight|jump|robot|webs|training)$/;
+const PLAYER_ICON_PATTERN = /^(portrait|symbol)-(speed|strength|teleport|telekinesis|flight|jump|robot|webs|fire|training)$/;
 const WEB_TRAP_DURATION = 3200;
 const DEFEAT_RESPAWN_DELAY = 4400;
 const FLIGHT_STRIKE_COOLDOWN = 12000;
+const FIRE_PUNCH_COOLDOWN = 450;
+const FIRE_COMBO_WINDOW = 1600;
+const FIREBALL_MIN_CHARGE = 1000;
+const FIREBALL_MAX_CHARGE = 2600;
+const FIREBALL_COOLDOWN = 3000;
+const FIRE_DASH_COOLDOWN = 3000;
+const FIRE_DASH_DISTANCE = 18;
+const FIRE_DASH_DURATION = 680;
+const FIRE_UP_DASH_DURATION = 480;
+const FIRE_DASH_TRAIL_DURATION = 2800;
+const FIRE_RING_COOLDOWN = 8000;
+const FIRE_RING_DURATION = 5000;
+const FIRE_BURN_TICKS = 3;
+const FIRE_BURN_TICK_MS = 600;
 const MAP_BOUNDS = {
   hub: [-23.6, 23.6, -23.6, 23.6], speedTrack: [-56.5, 56.5, 70.5, 161.5], minionArena: [-35.5, 35.5, 184.5, 253.5],
   strengthPit: [-35.5, 35.5, 282.5, 353.5], city: [-94, 94, 366, 554], pvpArena: [-38, 38, 612, 688], powerStation: [-43, 124, 724, 842],
@@ -158,6 +174,8 @@ export class GameRoom {
     this.entitySnapshots = new Map();
     this.thrownEntities = new Map();
     this.webTraps = new Map();
+    this.fireTrails = new Map();
+    this.fireRings = new Map();
     this.lastHazardPhase = new Map();
     this.duelQueues = new Map(Object.keys(DUEL_QUEUE_CONFIG).map((mode) => [mode, new Set()]));
     this.duelQueueCountdowns = new Map();
@@ -196,7 +214,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, fireChargeStartedAt: 0, lastFireballAt: 0, lastFireDashAt: 0, lastFireRingAt: 0, fireCombo: null, fireBurn: null, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -239,13 +257,15 @@ export class GameRoom {
         player.flightStrike = null;
         player.phaseBootsActive = false;
         player.phaseBootsEndsAt = 0;
+        this.clearFireEffectsBy(player.id);
       }
       const requestedMode = String(message.mode || player.mode || "hangout");
       if (ONLINE_MODES.has(requestedMode) && !player.matchId) player.mode = requestedMode;
       const requestedMap = String(message.map || "hub").slice(0, 24);
       const activeDuel = player.mode === "duels" && player.matchId === this.duelMatch?.id ? this.duelMatch : null;
       const nextMap = player.mode === "duels" && !player.matchId ? "duelLobby" : activeDuel?.map || requestedMap;
-      const requestedPower = String(message.power || "speed").slice(0, 24);
+      const requestedPowerValue = String(message.power || "speed").slice(0, 24);
+      const requestedPower = APPROVED_POWERS.has(requestedPowerValue) ? requestedPowerValue : "speed";
       const nextPower = player.mode === "duels" && !player.matchId ? "training" : activeDuel?.powers.get(player.id) || requestedPower;
       if (player.power !== nextPower || !player.maxHealth) {
         player.power = nextPower;
@@ -258,6 +278,10 @@ export class GameRoom {
         player.phaseBootsActive = false;
         player.phaseBootsEndsAt = 0;
         player.phaseBootsCooldownUntil = 0;
+        player.fireChargeStartedAt = 0;
+        player.fireCombo = null;
+        player.fireBurn = null;
+        this.clearFireEffectsBy(player.id);
         this.clearWebStatus(player);
       }
       player.map = nextMap;
@@ -278,12 +302,14 @@ export class GameRoom {
         player.respawnAt = 0;
         player.activeDefeatId = null;
         player.spawnProtectedUntil = now + 2000;
+        player.fireBurn = null;
         this.broadcast({ type: "player-respawn", id: player.id, health: player.health });
         this.send(socket, { type: "player-respawn", id: player.id, health: player.health });
       }
       this.expireShield(player);
       this.expireWebStatus(player);
       this.expirePhaseBoots(player);
+      this.processFireEffects(now);
       const holder = player.grabbedBy ? this.players.get(player.grabbedBy) : null;
       if (player.grabbedBy && !holder) {
         player.grabbedBy = null;
@@ -338,6 +364,11 @@ export class GameRoom {
       if (action.kind === "flight-strike-start") return this.handleFlightStrikeStart(player);
       if (action.kind === "flight-strike-impact") return this.handleFlightStrikeImpact(player, action);
       if (action.kind === "flight-strike-cancel") return this.handleFlightStrikeCancel(player);
+      if (action.kind === "fire-primary-down") return this.handleFirePrimaryDown(player);
+      if (action.kind === "fire-primary-release") return this.handleFirePrimaryRelease(player, action);
+      if (action.kind === "fire-dash") return this.handleFireDash(player, action);
+      if (action.kind === "fire-up-dash") return this.handleFireUpDash(player);
+      if (action.kind === "fire-ring") return this.handleFireRing(player, action);
       if (action.kind === "strength-release-player") {
         this.releaseVictimsHeldBy(player.id);
         return;
@@ -435,6 +466,9 @@ export class GameRoom {
     this.persistDuelState();
     const candidates = [...this.duelQueueCountdowns.values()];
     if (this.duelMatch?.phaseEndsAt) candidates.push(this.duelMatch.phaseEndsAt);
+    for (const player of this.players.values()) if (player.fireBurn?.nextTickAt) candidates.push(player.fireBurn.nextTickAt);
+    for (const trail of this.fireTrails.values()) candidates.push(trail.nextProcessAt || trail.expiresAt);
+    for (const ring of this.fireRings.values()) candidates.push(ring.nextProcessAt || ring.expiresAt);
     if (!candidates.length) return;
     const next = Math.max(Date.now() + 50, Math.min(...candidates));
     this.ctx.storage.setAlarm(next).catch(() => {});
@@ -453,6 +487,7 @@ export class GameRoom {
 
   async alarm() {
     await this.ready;
+    this.processFireEffects(Date.now());
     this.advanceDuelState();
   }
 
@@ -597,6 +632,10 @@ export class GameRoom {
       player.respawnAt = 0;
       player.activeDefeatId = null;
       player.spawnProtectedUntil = now + 2500;
+      player.fireChargeStartedAt = 0;
+      player.fireCombo = null;
+      player.fireBurn = null;
+      this.clearFireEffectsBy(player.id);
       player.damageRound = 0;
       player.state = { ...(player.state || {}), position: spawn, health: player.health };
       this.clearWebStatus(player);
@@ -638,6 +677,7 @@ export class GameRoom {
   }
 
   endDuelRound(match, scoringTeam) {
+    match.playerIds.forEach((id) => this.clearFireEffectsBy(id));
     const winnerTeam = Object.keys(match.scores).find((team) => match.scores[team] >= 5) || null;
     if (winnerTeam) {
       match.phase = "victory";
@@ -691,6 +731,10 @@ export class GameRoom {
     player.maxHealth = 100;
     player.respawnAt = 0;
     player.activeDefeatId = null;
+    player.fireChargeStartedAt = 0;
+    player.fireCombo = null;
+    player.fireBurn = null;
+    this.clearFireEffectsBy(player.id);
     player.state = { ...(player.state || {}), position: [0, 1.2, 915], health: 100 };
     this.savePlayer(player.socket, player);
     this.send(player.socket, { type: "duel-lobby", queues: this.duelQueueSnapshot(), position: [0, 1.2, 915] });
@@ -1406,6 +1450,323 @@ export class GameRoom {
     });
   }
 
+  fireDirection(player, requested) {
+    const fallback = safeVector(player.state?.forward, [0, 0, -1]);
+    const candidate = safeVector(requested, fallback);
+    const normalize = (vector) => {
+      const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+      return [vector[0] / length, vector[1] / length, vector[2] / length];
+    };
+    const forward = normalize(fallback);
+    const direction = normalize(candidate);
+    const alignment = forward[0] * direction[0] + forward[1] * direction[1] + forward[2] * direction[2];
+    return alignment >= 0.35 ? direction : forward;
+  }
+
+  nearestFireTarget(attacker, origin, direction, range, radius) {
+    let best = null;
+    let bestAlong = Infinity;
+    for (const target of this.players.values()) {
+      if (!this.canDamage(attacker, target) || !target.state?.position) continue;
+      const offset = [target.state.position[0] - origin[0], target.state.position[1] + 0.7 - origin[1], target.state.position[2] - origin[2]];
+      const along = offset[0] * direction[0] + offset[1] * direction[1] + offset[2] * direction[2];
+      if (along < 0 || along > range || along >= bestAlong) continue;
+      const missX = offset[0] - direction[0] * along;
+      const missY = offset[1] - direction[1] * along;
+      const missZ = offset[2] - direction[2] * along;
+      if (Math.hypot(missX, missY, missZ) > radius) continue;
+      best = target;
+      bestAlong = along;
+    }
+    return best;
+  }
+
+  applyFireDamage(attacker, target, damage, source, position = null, knockback = 0) {
+    if (!attacker || attacker.power !== "fire" || attacker.health <= 0 || attacker.respawnAt || !this.canDamage(attacker, target)) return 0;
+    if (this.blockDamage(attacker, target, "fire")) return 0;
+    const previousHealth = target.health;
+    target.health = Math.max(0, target.health - Math.max(0, Number(damage) || 0));
+    const verified = this.recordDamage(attacker, target, damage, previousHealth);
+    if (!verified) return 0;
+    const dx = target.state.position[0] - attacker.state.position[0];
+    const dz = target.state.position[2] - attacker.state.position[2];
+    const length = Math.hypot(dx, dz) || 1;
+    target.respawnAt = target.health <= 0 && target.mode !== "duels" ? Date.now() + DEFEAT_RESPAWN_DELAY : 0;
+    if (target.health <= 0) {
+      target.fireBurn = null;
+      target.grabbedBy = null;
+      target.grabbedMode = null;
+    }
+    this.savePlayer(target.socket, target);
+    this.broadcast({
+      type: "pvp-hit",
+      attackerId: attacker.id,
+      targetId: target.id,
+      health: target.health,
+      damage: verified,
+      impulse: [dx / length * knockback, Math.min(2.5, knockback * 0.3), dz / length * knockback],
+      defeated: target.health <= 0,
+      respawnAt: target.respawnAt,
+      power: "fire",
+      fireSource: source,
+      position: position || target.state.position,
+    });
+    if (target.health <= 0) this.announceDefeat(target, attacker);
+    return verified;
+  }
+
+  applyFireBurn(attacker, target, source, now = Date.now()) {
+    if (!this.canDamage(attacker, target) || attacker.power !== "fire" || target.health <= 0) return false;
+    target.fireBurn = {
+      id: crypto.randomUUID(),
+      attackerId: attacker.id,
+      source,
+      ticksLeft: FIRE_BURN_TICKS,
+      nextTickAt: now + FIRE_BURN_TICK_MS,
+      endsAt: now + FIRE_BURN_TICK_MS * FIRE_BURN_TICKS + 150,
+    };
+    this.savePlayer(target.socket, target);
+    this.broadcastToMap(target.map, { type: "fire-effect", effect: "burn", map: target.map, attackerId: attacker.id, targetId: target.id, source, endsAt: target.fireBurn.endsAt });
+    this.scheduleDuelTick();
+    return true;
+  }
+
+  handleFirePrimaryDown(player) {
+    if (player.power !== "fire" || player.health <= 0 || player.respawnAt || player.grabbedBy || !player.state?.position) return;
+    const now = Date.now();
+    if (now < (player.lastAttackAt || 0) + FIRE_PUNCH_COOLDOWN) {
+      player.fireChargeStartedAt = 0;
+      this.send(player.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: (player.lastAttackAt || 0) + FIRE_PUNCH_COOLDOWN });
+      this.savePlayer(player.socket, player);
+      return;
+    }
+    player.fireChargeStartedAt = now >= (player.lastFireballAt || 0) + FIREBALL_COOLDOWN ? now : 0;
+    this.savePlayer(player.socket, player);
+  }
+
+  handleFirePrimaryRelease(player, action) {
+    if (player.power !== "fire" || player.health <= 0 || player.respawnAt || player.grabbedBy || !player.state?.position) return;
+    const now = Date.now();
+    const chargeStartedAt = Number(player.fireChargeStartedAt) || 0;
+    const heldMs = chargeStartedAt ? Math.max(0, now - chargeStartedAt) : 0;
+    player.fireChargeStartedAt = 0;
+    this.savePlayer(player.socket, player);
+    if (chargeStartedAt && heldMs >= FIREBALL_MIN_CHARGE && now >= (player.lastFireballAt || 0) + FIREBALL_COOLDOWN) {
+      return this.handleFireball(player, action, heldMs, now);
+    }
+    return this.handleFlamePunch(player, action, now);
+  }
+
+  handleFlamePunch(attacker, action, now = Date.now()) {
+    if (now - (attacker.lastAttackAt || 0) < FIRE_PUNCH_COOLDOWN) {
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: (attacker.lastAttackAt || 0) + FIRE_PUNCH_COOLDOWN });
+      return;
+    }
+    attacker.lastAttackAt = now;
+    const origin = [attacker.state.position[0], attacker.state.position[1] + 0.72, attacker.state.position[2]];
+    const direction = this.fireDirection(attacker, action.direction);
+    const target = this.nearestFireTarget(attacker, origin, direction, 3.2, 1.2);
+    const end = target ? [target.state.position[0], target.state.position[1] + 0.72, target.state.position[2]] : [origin[0] + direction[0] * 2.4, origin[1] + direction[1] * 2.4, origin[2] + direction[2] * 2.4];
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "punch", map: attacker.map, attackerId: attacker.id, origin, end });
+    this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + FIRE_PUNCH_COOLDOWN });
+    if (!target || !this.applyFireDamage(attacker, target, 11, "punch", end, 3.6)) {
+      attacker.fireCombo = null;
+      this.savePlayer(attacker.socket, attacker);
+      this.send(attacker.socket, { type: "fire-combo", attackerId: attacker.id, count: 0, targetId: null, expiresAt: 0 });
+      return;
+    }
+    const combo = attacker.fireCombo;
+    const count = combo?.targetId === target.id && now <= (combo.expiresAt || 0) ? combo.count + 1 : 1;
+    attacker.fireCombo = { targetId: target.id, count, expiresAt: now + FIRE_COMBO_WINDOW };
+    this.send(attacker.socket, { type: "fire-combo", attackerId: attacker.id, count, targetId: target.id, expiresAt: count >= 3 ? now + 1000 : attacker.fireCombo.expiresAt, triggered: count >= 3 });
+    if (count >= 3) {
+      attacker.fireCombo = null;
+      attacker.lastAttackAt = now + (1000 - FIRE_PUNCH_COOLDOWN);
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-punch", cooldownUntil: now + 1000 });
+      this.applyFireBurn(attacker, target, "combo", now);
+    }
+    this.savePlayer(attacker.socket, attacker);
+  }
+
+  handleFireball(attacker, action, heldMs, now = Date.now()) {
+    const charge = Math.max(0, Math.min(1, (Math.min(heldMs, FIREBALL_MAX_CHARGE) - FIREBALL_MIN_CHARGE) / (FIREBALL_MAX_CHARGE - FIREBALL_MIN_CHARGE)));
+    const range = 24 + charge * 22;
+    const radius = 0.85 + charge * 0.95;
+    const damage = Math.round(18 + charge * 16);
+    const origin = [attacker.state.position[0], attacker.state.position[1] + 0.82, attacker.state.position[2]];
+    const direction = this.fireDirection(attacker, action.direction);
+    const target = this.nearestFireTarget(attacker, origin, direction, range, radius);
+    const end = target ? [target.state.position[0], target.state.position[1] + 0.72, target.state.position[2]] : [origin[0] + direction[0] * range, origin[1] + direction[1] * range, origin[2] + direction[2] * range];
+    const distance = Math.hypot(end[0] - origin[0], end[1] - origin[1], end[2] - origin[2]);
+    attacker.lastFireballAt = now;
+    attacker.fireCombo = null;
+    this.savePlayer(attacker.socket, attacker);
+    this.send(attacker.socket, { type: "ability-cooldown", ability: "fireball", cooldownUntil: now + FIREBALL_COOLDOWN });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "fireball", map: attacker.map, attackerId: attacker.id, start: origin, end, charge, duration: Math.round(Math.max(260, Math.min(700, distance / 64 * 1000))) });
+    if (target && this.applyFireDamage(attacker, target, damage, "fireball", end, 4.5)) this.applyFireBurn(attacker, target, "fireball", now);
+  }
+
+  handleFireDash(attacker, action) {
+    if (attacker.power !== "fire" || attacker.health <= 0 || attacker.respawnAt || attacker.grabbedBy || !attacker.state?.position) return;
+    const now = Date.now();
+    if (now - (attacker.lastFireDashAt || 0) < FIRE_DASH_COOLDOWN) {
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-dash", cooldownUntil: (attacker.lastFireDashAt || 0) + FIRE_DASH_COOLDOWN });
+      return;
+    }
+    const direction = this.fireDirection(attacker, action.direction);
+    const horizontalLength = Math.hypot(direction[0], direction[2]) || 1;
+    direction[0] /= horizontalLength;
+    direction[1] = 0;
+    direction[2] /= horizontalLength;
+    const origin = safeVector(attacker.state.position);
+    const bounds = MAP_BOUNDS[attacker.map];
+    const end = [origin[0] + direction[0] * FIRE_DASH_DISTANCE, origin[1], origin[2] + direction[2] * FIRE_DASH_DISTANCE];
+    if (bounds) {
+      end[0] = Math.max(bounds[0], Math.min(bounds[1], end[0]));
+      end[2] = Math.max(bounds[2], Math.min(bounds[3], end[2]));
+    }
+    const points = Array.from({ length: 17 }, (_, index) => {
+      const t = index / 16;
+      return [origin[0] + (end[0] - origin[0]) * t, origin[1], origin[2] + (end[2] - origin[2]) * t];
+    });
+    const id = crypto.randomUUID();
+    attacker.lastFireDashAt = now;
+    this.fireTrails.set(id, { id, attackerId: attacker.id, map: attacker.map, points, radius: 1.35, expiresAt: now + FIRE_DASH_TRAIL_DURATION, nextProcessAt: now + 100, hitIds: new Set() });
+    this.savePlayer(attacker.socket, attacker);
+    this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-dash", cooldownUntil: now + FIRE_DASH_COOLDOWN });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "dash", map: attacker.map, attackerId: attacker.id, points, dashEndsAt: now + FIRE_DASH_DURATION, expiresAt: now + FIRE_DASH_TRAIL_DURATION });
+    this.scheduleDuelTick();
+  }
+
+  handleFireUpDash(attacker) {
+    if (attacker.power !== "fire" || attacker.health <= 0 || attacker.respawnAt || attacker.grabbedBy || !attacker.state?.position) return;
+    const now = Date.now();
+    if (now - (attacker.lastFireUpDashAt || 0) < FIRE_DASH_COOLDOWN) {
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-up-dash", cooldownUntil: (attacker.lastFireUpDashAt || 0) + FIRE_DASH_COOLDOWN });
+      return;
+    }
+    attacker.lastFireUpDashAt = now;
+    const start = safeVector(attacker.state.position);
+    this.savePlayer(attacker.socket, attacker);
+    this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-up-dash", cooldownUntil: now + FIRE_DASH_COOLDOWN });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "up-dash", map: attacker.map, attackerId: attacker.id, start, dashEndsAt: now + FIRE_UP_DASH_DURATION });
+  }
+
+  handleFireRing(attacker, action) {
+    if (attacker.power !== "fire" || attacker.health <= 0 || attacker.respawnAt || attacker.grabbedBy || !attacker.state?.position) return;
+    const now = Date.now();
+    if (now - (attacker.lastFireRingAt || 0) < FIRE_RING_COOLDOWN) {
+      this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-ring", cooldownUntil: (attacker.lastFireRingAt || 0) + FIRE_RING_COOLDOWN });
+      return;
+    }
+    const requested = safeVector(action.point, attacker.state.position);
+    const dx = requested[0] - attacker.state.position[0];
+    const dz = requested[2] - attacker.state.position[2];
+    const distance = Math.hypot(dx, dz);
+    if (distance > 14.5) return;
+    const point = [requested[0], attacker.state.position[1], requested[2]];
+    const bounds = MAP_BOUNDS[attacker.map];
+    if (bounds) {
+      point[0] = Math.max(bounds[0], Math.min(bounds[1], point[0]));
+      point[2] = Math.max(bounds[2], Math.min(bounds[3], point[2]));
+    }
+    const id = crypto.randomUUID();
+    attacker.lastFireRingAt = now;
+    this.fireRings.set(id, { id, attackerId: attacker.id, map: attacker.map, point, radius: 5.5, expiresAt: now + FIRE_RING_DURATION, nextProcessAt: now + 100, nextTicks: new Map(), tickCounts: new Map(), burnedIds: new Set() });
+    this.savePlayer(attacker.socket, attacker);
+    this.send(attacker.socket, { type: "ability-cooldown", ability: "fire-ring", cooldownUntil: now + FIRE_RING_COOLDOWN });
+    this.broadcastToMap(attacker.map, { type: "fire-effect", effect: "ring", map: attacker.map, attackerId: attacker.id, ringId: id, point, radius: 5.5, expiresAt: now + FIRE_RING_DURATION });
+    this.scheduleDuelTick();
+  }
+
+  pointToFireTrailDistance(point, points) {
+    let best = Infinity;
+    for (let index = 1; index < points.length; index += 1) {
+      const a = points[index - 1];
+      const b = points[index];
+      const segment = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+      const lengthSq = segment[0] ** 2 + segment[1] ** 2 + segment[2] ** 2 || 1;
+      const t = Math.max(0, Math.min(1, ((point[0] - a[0]) * segment[0] + (point[1] - a[1]) * segment[1] + (point[2] - a[2]) * segment[2]) / lengthSq));
+      best = Math.min(best, Math.hypot(point[0] - (a[0] + segment[0] * t), point[1] - (a[1] + segment[1] * t), point[2] - (a[2] + segment[2] * t)));
+    }
+    return best;
+  }
+
+  processFireEffects(now = Date.now()) {
+    for (const target of this.players.values()) {
+      const burn = target.fireBurn;
+      if (!burn) continue;
+      const attacker = this.players.get(burn.attackerId);
+      if (!attacker || burn.ticksLeft <= 0 || now > burn.endsAt || !this.canDamage(attacker, target)) {
+        target.fireBurn = null;
+        this.savePlayer(target.socket, target);
+        continue;
+      }
+      while (target.fireBurn && burn.ticksLeft > 0 && now >= burn.nextTickAt) {
+        burn.nextTickAt += FIRE_BURN_TICK_MS;
+        burn.ticksLeft -= 1;
+        this.applyFireDamage(attacker, target, 2, "burn", target.state?.position, 0);
+        if (target.health <= 0) target.fireBurn = null;
+      }
+      if (target.fireBurn && burn.ticksLeft <= 0) target.fireBurn = null;
+      this.savePlayer(target.socket, target);
+    }
+    for (const [id, trail] of this.fireTrails) {
+      if (now >= trail.expiresAt) {
+        this.fireTrails.delete(id);
+        continue;
+      }
+      const attacker = this.players.get(trail.attackerId);
+      if (!attacker || attacker.health <= 0 || attacker.respawnAt || attacker.map !== trail.map) {
+        this.fireTrails.delete(id);
+        continue;
+      }
+      trail.nextProcessAt = Math.min(trail.expiresAt, now + 250);
+      for (const target of this.players.values()) {
+        if (trail.hitIds.has(target.id) || !this.canDamage(attacker, target) || !target.state?.position) continue;
+        if (this.pointToFireTrailDistance(target.state.position, trail.points) > trail.radius) continue;
+        trail.hitIds.add(target.id);
+        if (this.applyFireDamage(attacker, target, 4, "dash-trail", target.state.position, 1.4)) this.applyFireBurn(attacker, target, "dash-trail", now);
+      }
+    }
+    for (const [id, ring] of this.fireRings) {
+      if (now >= ring.expiresAt) {
+        this.fireRings.delete(id);
+        continue;
+      }
+      const attacker = this.players.get(ring.attackerId);
+      if (!attacker || attacker.health <= 0 || attacker.respawnAt || attacker.map !== ring.map) {
+        this.fireRings.delete(id);
+        continue;
+      }
+      ring.nextProcessAt = Math.min(ring.expiresAt, now + 250);
+      for (const target of this.players.values()) {
+        if (!this.canDamage(attacker, target) || !target.state?.position) continue;
+        const count = ring.tickCounts.get(target.id) || 0;
+        if (count >= 5 || now < (ring.nextTicks.get(target.id) || 0)) continue;
+        if (Math.hypot(target.state.position[0] - ring.point[0], target.state.position[2] - ring.point[2]) > ring.radius || Math.abs(target.state.position[1] - ring.point[1]) > 2.8) continue;
+        ring.nextTicks.set(target.id, now + 1000);
+        const verified = this.applyFireDamage(attacker, target, 5, "fire-ring", target.state.position, 0.8);
+        if (!verified) continue;
+        ring.tickCounts.set(target.id, count + 1);
+        if (!ring.burnedIds.has(target.id)) {
+          ring.burnedIds.add(target.id);
+          this.applyFireBurn(attacker, target, "fire-ring", now);
+        }
+      }
+    }
+  }
+
+  clearFireEffectsBy(playerId) {
+    for (const [id, trail] of this.fireTrails) if (trail.attackerId === playerId) this.fireTrails.delete(id);
+    for (const [id, ring] of this.fireRings) if (ring.attackerId === playerId) this.fireRings.delete(id);
+    for (const target of this.players.values()) {
+      if (target.fireBurn?.attackerId !== playerId && target.id !== playerId) continue;
+      target.fireBurn = null;
+      if (target.socket) this.savePlayer(target.socket, target);
+    }
+  }
+
   canDamage(attacker, target) {
     if (!attacker || !target || attacker.id === target.id || attacker.map !== target.map || !isCombatPlayer(attacker) || !isCombatPlayer(target)) return false;
     const now = Date.now();
@@ -1467,6 +1828,7 @@ export class GameRoom {
 
   resolvePvpAttack(attacker, action) {
     if (!isCombatPlayer(attacker) || attacker.health <= 0 || !attacker.state?.position) return false;
+    if (attacker.power === "fire") return false;
     const spec = ATTACKS[attacker.power];
     if (!spec) return false;
     const now = Date.now();
@@ -1528,6 +1890,10 @@ export class GameRoom {
     target.shieldActive = false;
     target.shieldEndsAt = 0;
     target.flightStrike = null;
+    target.fireChargeStartedAt = 0;
+    target.fireCombo = null;
+    target.fireBurn = null;
+    this.clearFireEffectsBy(target.id);
     this.clearWebStatus(target);
     this.releaseVictimsHeldBy(target.id);
     this.releaseWebVictimsBy(target.id);
@@ -1578,6 +1944,7 @@ export class GameRoom {
     }
     this.releaseVictimsHeldBy(player.id);
     this.releaseWebVictimsBy(player.id);
+    this.clearFireEffectsBy(player.id);
     this.broadcast({ type: "player-left", id: player.id });
     if (this.hostId === player.id) {
       this.hostId = [...this.players.values()].sort((a, b) => a.joinedAt - b.joinedAt)[0]?.id || null;

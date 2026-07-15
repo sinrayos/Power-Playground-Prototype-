@@ -94,10 +94,10 @@ const leaderboard = await alpha.waitFor((message) => message.type === "leaderboa
 assert.ok(leaderboard.players.find((player) => player.id === alpha.id).damageRound >= 100);
 
 const intermission = await alpha.waitFor((message) => message.type === "duel-intermission", 5000);
-assert.equal(intermission.duel.scores.A, 1);
-alpha.send({ type: "action", action: { kind: "duel-select-power", power: "robot" } });
-const changed = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.powers?.[alpha.id] === "robot");
-assert.equal(changed.duel.powers[alpha.id], "robot");
+assert.equal(intermission.duel.scores[intermission.duel.teams[alpha.id]], 1, "The verified attacker team must receive the round point");
+alpha.send({ type: "action", action: { kind: "duel-select-power", power: "fire" } });
+const changed = await alpha.waitFor((message) => message.type === "duel-phase" && message.duel?.powers?.[alpha.id] === "fire");
+assert.equal(changed.duel.powers[alpha.id], "fire", "Fire Guy must be approved in the Duel selection phase");
 
 beta.socket.close(1000, "disconnect test");
 const cancelled = await alpha.waitFor((message) => message.type === "duel-cancelled", 5000);

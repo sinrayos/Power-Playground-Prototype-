@@ -1,7 +1,7 @@
 ﻿import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js";
-import { MAP_DATA, POWER_DATA } from "./config.js?v=20260714-station-neutral";
-import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260710-pop-theme";
+import { MAP_DATA, POWER_DATA } from "./config.js?v=20260715-fire-guy-2";
+import { playSfx as playLocalSfx, startMenuMusic, stopMenuMusic } from "./sfx.js?v=20260715-fire-guy";
 import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multiplayer.js?v=20260706-v2";
 
     const keys = new Set();
@@ -18,6 +18,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const ROBOT_SHOT_COOLDOWN = 850;
     const PHASE_BOOTS_DURATION = 5000;
     const PHASE_BOOTS_COOLDOWN = 10000;
+    const FIRE_PUNCH_COOLDOWN = 450;
+    const FIREBALL_MIN_CHARGE = 1000;
+    const FIREBALL_MAX_CHARGE = 2600;
+    const FIREBALL_COOLDOWN = 3000;
+    const FIRE_DASH_COOLDOWN = 3000;
+    const FIRE_DASH_DISTANCE = 18;
+    const FIRE_DASH_DURATION = 680;
+    const FIRE_UP_DASH_DURATION = 480;
+    const FIRE_UP_DASH_VELOCITY = 18.5;
+    const FIRE_RING_COOLDOWN = 8000;
     const COLLISION_GROUP_FLOOR = 1;
     const COLLISION_GROUP_PASSABLE = 2;
     const COLLISION_GROUP_BOUNDARY = 4;
@@ -166,6 +176,29 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let webWallHorizontalInput = 0;
     let webWallMoving = false;
     let webWallFacingAngle = 0;
+    let firePrimaryDownAt = 0;
+    let fireChargeAllowed = false;
+    let firePunchCooldownUntil = 0;
+    let fireballCooldownUntil = 0;
+    let fireDashCooldownUntil = 0;
+    let fireUpDashCooldownUntil = 0;
+    let fireRingCooldownUntil = 0;
+    let firePunchUntil = 0;
+    let fireThrowUntil = 0;
+    let fireDashUntil = 0;
+    let fireDashMode = "forward";
+    let fireDashKeyHeld = false;
+    const fireDashDirection = new THREE.Vector3(0, 0, -1);
+    let lastFireChargeSparkAt = 0;
+    let fireDashTrailAt = 0;
+    const fireDashLastTrailPosition = new THREE.Vector3();
+    let fireComboCount = 0;
+    let fireComboExpiresAt = 0;
+    const fireVisuals = [];
+    const remoteFireDashes = new Map();
+    const soloFireBurns = [];
+    const soloFireZones = [];
+    let soloFireCombo = { target: null, count: 0, expiresAt: 0 };
     const webSwingAnchor = new THREE.Vector3();
     const webWallNormal = new THREE.Vector3(0, 0, 1);
     const webWallPoseMatrix = new THREE.Matrix4();
@@ -255,6 +288,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const powerHelp = document.getElementById("powerHelp");
     const chargeFill = document.getElementById("chargeFill");
     const flightBadge = document.getElementById("flightBadge");
+    const fireComboHud = document.getElementById("fireComboHud");
     const flyMeter = document.getElementById("flyMeter");
     const flyMeterFill = document.getElementById("flyMeterFill");
     const flyMeterState = document.getElementById("flyMeterState");
@@ -335,7 +369,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const controllerStatus = document.getElementById("controllerStatus");
     const controllerCursor = document.getElementById("controllerCursor");
 
-    const PLAYER_ICON_POWERS = ["speed", "strength", "teleport", "telekinesis", "flight", "jump", "robot", "webs", "training"];
+    const PLAYER_ICON_POWERS = ["speed", "strength", "teleport", "telekinesis", "flight", "jump", "robot", "webs", "fire", "training"];
     const PLAYER_ICON_IDS = PLAYER_ICON_POWERS.flatMap((power) => [`portrait-${power}`, `symbol-${power}`]);
     const PIXEL_FACE_RECTS = {
       speed: [[5,7,8,2],[19,7,8,2],[7,11,6,6],[19,11,6,6],[5,20,22,3],[8,23,16,5,"#ffffff"],[11,23,2,3],[19,23,2,3]],
@@ -346,6 +380,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       jump: [[5,7,8,2],[20,9,6,2],[7,11,6,6],[21,12,4,3],[6,21,6,3],[12,23,13,2],[20,25,5,4,"#ff69b4"]],
       robot: [[3,8,26,11,"#263449"],[7,11,6,4,"#67e8f9"],[19,11,6,4,"#67e8f9"],[10,23,12,2,"#67e8f9"]],
       webs: [[5,10,9,2],[18,9,9,2],[8,12,5,4],[19,12,5,4],[10,22,13,2],[19,20,5,2]],
+      fire: [[5,8,4,2],[8,9,4,2],[11,10,5,2],[18,9,5,2],[22,8,5,2],[7,13,7,2],[9,15,5,1],[19,12,7,2],[19,14,5,1],[10,22,10,2],[19,20,5,2],[12,24,7,1]],
       training: [[7,9,6,3],[19,9,6,3],[9,21,14,2],[12,23,8,2]]
     };
     const iconArtCache = new Map();
@@ -367,6 +402,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         jump: '<path d="M18 9v9l-8 5 16 7-16 7 16 7-8 5v7M46 9v9l8 5-16 7 16 7-16 7 8 5v7"/>',
         robot: '<circle cx="32" cy="32" r="24" fill="#05070b" stroke="#22d3ee"/><path d="M14 25h36l-6 17H20z" fill="#22d3ee" stroke="#67e8f9"/><path d="M23 32h6m6 0h6" stroke="#05070b" stroke-width="4"/>',
         webs: '<path d="M32 7v50M7 32h50M14 14l36 36M50 14 14 50M32 7C18 7 7 18 7 32s11 25 25 25 25-11 25-25S46 7 32 7zm0 9c-9 0-16 7-16 16s7 16 16 16 16-7 16-16-7-16-16-16zm0 8a8 8 0 1 0 0 16 8 8 0 0 0 0-16z"/>',
+        fire: '<path d="M19 39c-5-11 4-18 9-31 8 7 5 14 10 19 4-5 8-8 10-14 7 13 9 23 3 33-5 9-15 13-24 8-7-3-11-9-8-15z" fill="#ff6a00" stroke="#fff"/><path d="M27 43c-2-5 2-9 6-16 5 5 4 9 7 12 2-2 4-4 5-7 3 7 2 13-2 16-6 5-14 2-16-5z" fill="#fff2a8" stroke="none"/>',
         training: '<path d="M32 7 51 18v28L32 57 13 46V18z"/><path d="M32 17v30M20 24h24M20 40h24" stroke-width="3"/>'
       };
       const portraitPixels = PIXEL_FACE_RECTS[power].map(([x,y,width,height,fill = "#172033"]) => `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="${fill}"/>`).join("");
@@ -426,10 +462,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         ["jump", "89%", "70%", "96px", "-18deg", ".32", ""],
         ["robot", "84%", "28%", "82px", "12deg", ".4", ""],
         ["webs", "45%", "50%", "154px", "-8deg", ".2", "large"],
-        ["speed", "62%", "60%", "78px", "21deg", ".28", ""],
-        ["strength", "12%", "54%", "70px", "-20deg", ".3", ""],
-        ["teleport", "94%", "12%", "124px", "-12deg", ".22", "large"],
-        ["webs", "30%", "34%", "86px", "14deg", ".26", ""],
+        ["fire", "57%", "31%", "118px", "12deg", ".32", "large"],
         ["training", "70%", "82%", "92px", "-9deg", ".34", ""],
       ];
       layout.forEach(([power, x, y, size, rot, opacity, extra]) => {
@@ -2393,6 +2426,38 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     rightFoot.material = suitDarkMat.clone();
     Object.assign(playerParts, { leftHand, rightHand, leftFoot, rightFoot });
 
+    function addFireCuff(hand, mirrored = false) {
+      const cuff = new THREE.Group();
+      cuff.visible = false;
+      cuff.position.set(0, 0.08, 0);
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(0.14, 0.038, 8, 22),
+        new THREE.MeshStandardMaterial({ color: 0xffd21f, emissive: 0xff6a00, emissiveIntensity: 0.36, roughness: 0.4 })
+      );
+      band.rotation.x = Math.PI / 2;
+      cuff.add(band);
+      for (let index = 0; index < 5; index += 1) {
+        const angle = (index / 5) * Math.PI * 2;
+        const flame = new THREE.Mesh(
+          new THREE.ConeGeometry(0.05, 0.18 + (index % 2) * 0.055, 6),
+          new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.9 })
+        );
+        flame.position.set(Math.cos(angle) * 0.12, 0.08 + (index % 2) * 0.018, Math.sin(angle) * 0.12);
+        flame.rotation.z = mirrored ? 0.16 : -0.16;
+        cuff.add(flame);
+      }
+      const glow = new THREE.Mesh(
+        new THREE.SphereGeometry(0.105, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      cuff.add(glow);
+      hand.add(cuff);
+      return cuff;
+    }
+    const leftFireCuff = addFireCuff(leftHand, true);
+    const rightFireCuff = addFireCuff(rightHand, false);
+    Object.assign(playerParts, { leftFireCuff, rightFireCuff });
+
     const phaseBootMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.34, metalness: 0.18, emissive: 0x7c2d12, emissiveIntensity: 0.12 });
     const phaseBootAuraMat = new THREE.MeshBasicMaterial({ color: 0xa855f7, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
     function addPhaseBoot(foot) {
@@ -2554,7 +2619,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       "torso", "chest", "head", "cape", "leftArm", "rightArm", "leftLeg", "rightLeg",
       "leftHand", "rightHand", "leftFoot", "rightFoot", "heldPearl", "strongSword",
       "leftPhaseBoot", "rightPhaseBoot", "leftPhaseBootAura", "rightPhaseBootAura",
-      "robotArmorGroup", "leftBlaster", "rightBlaster", "robotShield", "aura"
+      "robotArmorGroup", "leftBlaster", "rightBlaster", "robotShield", "leftFireCuff", "rightFireCuff", "aura"
     ];
 
     function captureNetworkPose() {
@@ -2590,14 +2655,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function styleRemoteRig(parts, power) {
       const color = POWER_DATA[power]?.color || 0x2563eb;
-      parts.torso.material.color.setHex(power === "webs" ? 0xdc2626 : color);
-      parts.leftArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : color);
-      parts.rightArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : color);
+      parts.torso.material.color.setHex(power === "webs" ? 0xdc2626 : power === "fire" ? 0xff7a00 : color);
+      parts.leftArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : power === "fire" ? 0xff3b1f : color);
+      parts.rightArmMesh.material.color.setHex(power === "webs" ? 0x2563eb : power === "fire" ? 0xff3b1f : color);
       parts.head.material.color.setHex(power === "robot" ? 0x111827 : 0xe5e7eb);
       parts.leftHand.material.color.setHex(power === "robot" ? 0x334155 : 0xe5e7eb);
       parts.rightHand.material.color.setHex(power === "robot" ? 0x334155 : 0xe5e7eb);
       parts.leftFoot.material.color.setHex(power === "jump" ? 0x38bdf8 : power === "speed" ? 0xffea00 : 0x111827);
       parts.rightFoot.material.color.copy(parts.leftFoot.material.color);
+      if (parts.leftFireCuff) parts.leftFireCuff.visible = power === "fire";
+      if (parts.rightFireCuff) parts.rightFireCuff.visible = power === "fire";
       parts.aura.material.color.setHex(color);
       applyPowerFace(parts, power);
     }
@@ -2682,6 +2749,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         else child.material?.dispose();
       });
       remote.tag?.texture?.dispose();
+      remoteFireDashes.delete(id);
       remotePlayers.delete(id);
     }
 
@@ -3475,6 +3543,47 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
       }
       if (packet.type === "map-hazard") applyMapHazard(packet);
+      if (packet.type === "fire-effect") withoutNetworkVisualRelay(() => applyNetworkFireEffect(packet));
+      if (packet.type === "fire-combo" && packet.attackerId === multiplayerClient?.id) {
+        fireComboCount = Math.max(0, Math.min(3, Number(packet.count) || 0));
+        fireComboExpiresAt = networkTimeToPerformance(packet.expiresAt);
+        if (fireComboCount >= 3) firePunchCooldownUntil = Math.max(firePunchCooldownUntil, fireComboExpiresAt);
+      }
+    }
+
+    function applyNetworkFireEffect(packet) {
+      if (packet.map && packet.map !== selectedMap) return;
+      if (packet.effect === "punch") {
+        if (packet.attackerId === multiplayerClient?.id) return;
+        const remote = remotePlayers.get(packet.attackerId);
+        if (remote) remote.firePunchUntil = performance.now() + 360;
+        const start = remote?.parts?.rightHand?.getWorldPosition?.(new THREE.Vector3()) || new THREE.Vector3().fromArray(packet.origin || [0, 0, 0]);
+        const end = new THREE.Vector3().fromArray(packet.end || packet.origin || [0, 0, 0]);
+        spawnBeam(start, end, 0xff6a00, 0.075, 0.18);
+        spawnBurst(end, 0xffd21f, 7, 0.3);
+        playLocalSfx("flamePunch");
+      }
+      if (packet.effect === "fireball") {
+        if (packet.attackerId === multiplayerClient?.id) fireThrowUntil = performance.now() + 520;
+        spawnFireballVisual(new THREE.Vector3().fromArray(packet.start), new THREE.Vector3().fromArray(packet.end), Number(packet.charge) || 0, Number(packet.duration) || 480);
+      }
+      if (packet.effect === "dash") {
+        if (packet.attackerId === multiplayerClient?.id) return;
+        const remote = remotePlayers.get(packet.attackerId);
+        const start = remote?.group.position.clone() || new THREE.Vector3().fromArray(packet.points?.[0] || [0, 0, 0]);
+        remoteFireDashes.set(packet.attackerId, { mode: "forward", expiresAt: networkTimeToPerformance(packet.dashEndsAt || Date.now() + FIRE_DASH_DURATION), lastAt: 0, lastPosition: start });
+        playLocalSfx("flameDash");
+      }
+      if (packet.effect === "up-dash") {
+        if (packet.attackerId === multiplayerClient?.id) return;
+        const remote = remotePlayers.get(packet.attackerId);
+        const start = remote?.group.position.clone() || new THREE.Vector3().fromArray(packet.start || [0, 0, 0]);
+        remoteFireDashes.set(packet.attackerId, { mode: "up", expiresAt: networkTimeToPerformance(packet.dashEndsAt || Date.now() + FIRE_UP_DASH_DURATION), lastAt: 0, lastPosition: start });
+        spawnAirFlamePatch(start.clone().add(new THREE.Vector3(0, -0.35, 0)), 700);
+        playLocalSfx("flameDash");
+      }
+      if (packet.effect === "ring" && packet.attackerId !== multiplayerClient?.id) spawnFireRingVisual(new THREE.Vector3().fromArray(packet.point), Number(packet.radius) || 5.5, Number(packet.expiresAt) || Date.now() + 5000);
+      if (packet.effect === "burn") spawnBurnVisual(packet.targetId, Number(packet.endsAt) || Date.now() + 1900);
     }
 
     function placeAtPvpSpawn(id) {
@@ -3650,8 +3759,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerBody.velocity.y += packet.impulse[1];
         playerBody.velocity.z += packet.impulse[2];
         const effectPosition = Array.isArray(packet.position) ? new THREE.Vector3().fromArray(packet.position) : threeFromCannon(playerBody.position);
-        spawnRing(groundEffectPoint(effectPosition), color, packet.slam ? 0.45 : 0.35, packet.slam ? 2.7 : 2.2, packet.slam ? 0.42 : 0.35);
-        spawnBurst(effectPosition.clone().add(new THREE.Vector3(0, 0.8, 0)), color, packet.slam ? 16 : 10, 0.4);
+        if (packet.fireSource !== "burn") {
+          spawnRing(groundEffectPoint(effectPosition), color, packet.slam ? 0.45 : 0.35, packet.slam ? 2.7 : 2.2, packet.slam ? 0.42 : 0.35);
+          spawnBurst(effectPosition.clone().add(new THREE.Vector3(0, 0.8, 0)), color, packet.slam ? 16 : 10, 0.4);
+        }
         playSfx(packet.slam ? "telekinesisThrow" : "playerHit");
         if (packet.slam && !packet.defeated) showMessage(`Telekinetic slam: ${packet.damage} damage`, 850);
         if (packet.defeated) {
@@ -3671,7 +3782,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           remote.health = packet.health;
           updatePlayerTag(remote.tag, remote.username, remote.health);
           const effectPosition = Array.isArray(packet.position) ? new THREE.Vector3().fromArray(packet.position) : remote.group.position.clone();
-          spawnBurst(effectPosition.add(new THREE.Vector3(0, 1, 0)), color, packet.slam ? 16 : 12, 0.4);
+          if (packet.fireSource !== "burn") spawnBurst(effectPosition.add(new THREE.Vector3(0, 1, 0)), color, packet.slam ? 16 : 12, 0.4);
           if (packet.slam) {
             spawnRing(groundEffectPoint(remote.group.position.clone()), color, 0.45, 2.7, 0.42);
             playSfx("telekinesisThrow");
@@ -3927,6 +4038,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         phaseBootsCooldownUntil = Math.max(phaseBootsCooldownUntil, until);
         showMessage(`Phase Boots ready in ${Math.max(0.1, (phaseBootsCooldownUntil - performance.now()) / 1000).toFixed(1)}s`, 800);
       }
+      if (packet.ability === "fire-punch") firePunchCooldownUntil = Math.max(firePunchCooldownUntil, until);
+      if (packet.ability === "fireball") fireballCooldownUntil = Math.max(fireballCooldownUntil, until);
+      if (packet.ability === "fire-dash") fireDashCooldownUntil = Math.max(fireDashCooldownUntil, until);
+      if (packet.ability === "fire-up-dash") fireUpDashCooldownUntil = Math.max(fireUpDashCooldownUntil, until);
+      if (packet.ability === "fire-ring") fireRingCooldownUntil = Math.max(fireRingCooldownUntil, until);
     }
 
     function applyWebPullStart(packet) {
@@ -4696,6 +4812,253 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       }
     }
 
+    function createFlameSprite(scale = 1) {
+      const flame = new THREE.Group();
+      const outer = new THREE.Mesh(
+        new THREE.ConeGeometry(0.16 * scale, 0.5 * scale, 7),
+        new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.82, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      outer.position.y = 0.24 * scale;
+      const inner = new THREE.Mesh(
+        new THREE.ConeGeometry(0.075 * scale, 0.3 * scale, 7),
+        new THREE.MeshBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.78, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      inner.position.y = 0.16 * scale;
+      flame.add(outer, inner);
+      return flame;
+    }
+
+    function createFlameSilhouette(scale = 1) {
+      const outerShape = new THREE.Shape();
+      outerShape.moveTo(0, -0.5);
+      outerShape.bezierCurveTo(-0.44, -0.3, -0.4, 0.12, -0.12, 0.32);
+      outerShape.bezierCurveTo(-0.19, 0.02, 0.08, -0.02, 0.12, -0.38);
+      outerShape.bezierCurveTo(0.46, -0.08, 0.42, 0.36, 0.04, 0.72);
+      outerShape.bezierCurveTo(0.1, 0.36, -0.13, 0.23, -0.22, 0.52);
+      outerShape.bezierCurveTo(-0.54, 0.15, -0.5, -0.31, 0, -0.5);
+      const innerShape = new THREE.Shape();
+      innerShape.moveTo(0, -0.34);
+      innerShape.bezierCurveTo(-0.2, -0.16, -0.14, 0.08, 0.02, 0.24);
+      innerShape.bezierCurveTo(0.03, 0.02, 0.19, -0.02, 0.16, -0.2);
+      innerShape.bezierCurveTo(0.34, 0.02, 0.23, 0.27, 0.02, 0.45);
+      innerShape.bezierCurveTo(-0.24, 0.16, -0.27, -0.17, 0, -0.34);
+      const group = new THREE.Group();
+      const outer = new THREE.Mesh(
+        new THREE.ShapeGeometry(outerShape, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff6a00, side: THREE.DoubleSide, transparent: true, opacity: 0.76, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      const inner = new THREE.Mesh(
+        new THREE.ShapeGeometry(innerShape, 8),
+        new THREE.MeshBasicMaterial({ color: 0xfff2a8, side: THREE.DoubleSide, transparent: true, opacity: 0.84, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      inner.position.z = 0.008;
+      group.add(outer, inner);
+      group.scale.setScalar(scale);
+      group.userData.baseScale = scale;
+      return group;
+    }
+
+    function spawnFireballVisual(start, end, charge = 0, duration = 420) {
+      const size = THREE.MathUtils.lerp(0.24, 0.7, THREE.MathUtils.clamp(charge, 0, 1));
+      const root = new THREE.Group();
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(size, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffd21f, transparent: true, opacity: 0.94, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(size * 1.42, 14, 10),
+        new THREE.MeshBasicMaterial({ color: 0xff6a00, wireframe: true, transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      root.add(core, shell);
+      root.position.copy(start);
+      scene.add(root);
+      fireVisuals.push({ type: "projectile", root, start: start.clone(), end: end.clone(), startedAt: performance.now(), duration, lastSparkAt: 0 });
+      playLocalSfx("fireballThrow");
+    }
+
+    function spawnDashFlamePatch(point, duration = 1100) {
+      const root = new THREE.Group();
+      root.position.copy(groundEffectPoint(point, 0.025));
+      for (let index = 0; index < 3; index += 1) {
+        const angle = index / 3 * Math.PI * 2;
+        const flame = createFlameSprite(0.72 + (index % 3) * 0.18);
+        flame.position.set(Math.cos(angle) * 0.34, 0, Math.sin(angle) * 0.34);
+        flame.rotation.y = -angle;
+        root.add(flame);
+      }
+      scene.add(root);
+      fireVisuals.push({ type: "field", root, startedAt: performance.now(), duration });
+    }
+
+    function spawnAirFlamePatch(point, duration = 620) {
+      const root = new THREE.Group();
+      root.position.copy(point);
+      for (let index = 0; index < 3; index += 1) {
+        const angle = index / 3 * Math.PI * 2;
+        const flame = createFlameSilhouette(0.2 + (index % 2) * 0.045);
+        flame.position.set(Math.cos(angle) * (0.16 + (index % 2) * 0.12), (index % 3) * 0.12, Math.sin(angle) * (0.16 + (index % 2) * 0.12));
+        flame.rotation.y = angle;
+        root.add(flame);
+      }
+      scene.add(root);
+      fireVisuals.push({ type: "air-flame", root, startedAt: performance.now(), duration });
+    }
+
+    function spawnFireRingVisual(point, radius = 4, expiresAt = Date.now() + 5000) {
+      const root = new THREE.Group();
+      root.position.copy(groundEffectPoint(point, 0.05));
+      const floor = new THREE.Mesh(
+        new THREE.RingGeometry(Math.max(0.2, radius - 0.42), radius + 0.18, 54),
+        new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      root.add(floor);
+      for (let index = 0; index < 22; index += 1) {
+        const angle = index / 22 * Math.PI * 2;
+        const flame = createFlameSprite(0.8 + (index % 3) * 0.13);
+        flame.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+        flame.rotation.y = -angle;
+        root.add(flame);
+      }
+      const interiorFlames = [];
+      for (let index = 0; index < 12; index += 1) {
+        const angle = index * 2.399963229728653;
+        const distance = radius * (0.14 + 0.7 * Math.sqrt((index + 1) / 12));
+        const flame = createFlameSilhouette(0.14 + (index % 4) * 0.025);
+        flame.position.set(Math.cos(angle) * distance, 0.05, Math.sin(angle) * distance);
+        flame.rotation.y = angle + Math.PI;
+        flame.userData.phase = index / 12;
+        flame.traverse((child) => {
+          if (child.material) child.material.opacity *= 0.38;
+        });
+        root.add(flame);
+        interiorFlames.push(flame);
+      }
+      scene.add(root);
+      fireVisuals.push({ type: "ring", root, interiorFlames, startedAt: performance.now(), duration: Math.max(300, expiresAt - Date.now()) });
+      playLocalSfx("fireRing");
+    }
+
+    function spawnBurnVisual(targetId, endsAt, targetObject = null) {
+      const existing = fireVisuals.find((visual) => visual.type === "burn" && visual.targetId === targetId);
+      if (existing) {
+        existing.duration = Math.max(existing.duration, endsAt - Date.now());
+        existing.startedAt = performance.now();
+        if (targetObject) existing.targetObject = targetObject;
+        return;
+      }
+      const root = new THREE.Group();
+      const flames = [];
+      Array.from({ length: 12 }, (_, index) => index).forEach((index) => {
+        const angle = index / 12 * Math.PI * 2;
+        const flame = createFlameSprite(0.62 + (index % 5) * 0.1);
+        flame.position.set(Math.cos(angle) * (0.38 + (index % 2) * 0.12), 0.04 + (index % 5) * 0.24, Math.sin(angle) * (0.34 + (index % 2) * 0.1));
+        root.add(flame);
+        flames.push(flame);
+      });
+      const silhouettes = [];
+      for (let index = 0; index < 3; index += 1) {
+        const angle = index / 3 * Math.PI * 2;
+        const flame = createFlameSilhouette(0.72 + (index % 2) * 0.12);
+        flame.position.set(Math.sin(angle) * 0.54, 0.78 + (index % 2) * 0.16, Math.cos(angle) * 0.54);
+        flame.rotation.y = angle;
+        root.add(flame);
+        silhouettes.push(flame);
+      }
+      const flameParticles = [];
+      for (let index = 0; index < 14; index += 1) {
+        const particle = createFlameSilhouette(0.09 + (index % 4) * 0.02);
+        particle.userData.phase = index / 14;
+        particle.userData.speed = 0.72 + (index % 7) * 0.09;
+        particle.userData.radius = 0.28 + (index % 6) * 0.055;
+        particle.rotation.y = index / 14 * Math.PI * 2;
+        root.add(particle);
+        flameParticles.push(particle);
+      }
+      scene.add(root);
+      fireVisuals.push({ type: "burn", targetId, targetObject, root, flames, silhouettes, flameParticles, startedAt: performance.now(), duration: Math.max(300, endsAt - Date.now()) });
+    }
+
+    function updateFireVisuals(now) {
+      for (const [id, dash] of remoteFireDashes) {
+        const remote = remotePlayers.get(id);
+        if (!remote || now >= dash.expiresAt) {
+          remoteFireDashes.delete(id);
+          continue;
+        }
+        if (now - dash.lastAt < 85) continue;
+        dash.lastAt = now;
+        const current = remote.group.position.clone();
+        if (current.distanceToSquared(dash.lastPosition) <= 0.04) continue;
+        const patchPoint = dash.lastPosition.clone().lerp(current, 0.5);
+        if (dash.mode === "up") spawnAirFlamePatch(patchPoint, 620);
+        else spawnDashFlamePatch(patchPoint, 1250);
+        dash.lastPosition.copy(current);
+      }
+      for (let index = fireVisuals.length - 1; index >= 0; index -= 1) {
+        const visual = fireVisuals[index];
+        const elapsed = now - visual.startedAt;
+        const t = THREE.MathUtils.clamp(elapsed / visual.duration, 0, 1);
+        if (visual.type === "projectile") {
+          visual.root.position.copy(visual.start).lerp(visual.end, t);
+          visual.root.rotation.y += 0.22;
+          visual.root.scale.setScalar(1 + Math.sin(now * 0.025) * 0.08);
+          if (elapsed - visual.lastSparkAt > 70) {
+            visual.lastSparkAt = elapsed;
+            spawnBurst(visual.root.position, 0xff6a00, 3, 0.24);
+          }
+          if (t >= 1) {
+            spawnBurst(visual.end, 0xff6a00, 20, 0.56);
+            spawnBurst(visual.end, 0xfff2a8, 8, 0.36);
+            spawnRing(groundEffectPoint(visual.end), 0xffd21f, 0.3, 2.4, 0.38);
+            playLocalSfx("fireImpact");
+          }
+        } else if (visual.type === "burn") {
+          const target = visual.targetObject?.group || (visual.targetId === multiplayerClient?.id ? playerGroup : remotePlayers.get(visual.targetId)?.group);
+          if (target) visual.root.position.copy(target.position).add(new THREE.Vector3(0, 0.05, 0));
+          visual.flames.forEach((flame, flameIndex) => {
+            flame.scale.setScalar(0.86 + Math.sin(now * 0.018 + flameIndex) * 0.18);
+          });
+          visual.silhouettes.forEach((flame, flameIndex) => {
+            const pulse = flame.userData.baseScale * (0.9 + Math.sin(now * 0.014 + flameIndex * 1.7) * 0.13);
+            flame.scale.set(pulse * (0.92 + Math.sin(now * 0.021 + flameIndex) * 0.08), pulse, pulse);
+          });
+          visual.flameParticles.forEach((particle) => {
+            const rise = (now * 0.0007 * particle.userData.speed + particle.userData.phase) % 1;
+            const angle = particle.userData.phase * Math.PI * 2 + now * 0.0018 * particle.userData.speed;
+            const radius = particle.userData.radius * (1 - rise * 0.34);
+            const scale = particle.userData.baseScale * (0.72 + (1 - rise) * 0.65);
+            particle.position.set(Math.cos(angle) * radius, 0.12 + rise * 1.75, Math.sin(angle) * radius);
+            particle.scale.setScalar(scale);
+            particle.traverse((child) => {
+              if (child.material) child.material.opacity = (child === particle.children[0] ? 0.76 : 0.84) * (1 - rise * 0.62);
+            });
+          });
+        } else if (visual.type === "ring") {
+          visual.root.children.forEach((child, childIndex) => {
+            if (child.geometry?.type === "RingGeometry") child.material.opacity = 0.24 + Math.sin(now * 0.009) * 0.08;
+            else if (!child.userData.phase) child.scale.setScalar(0.82 + Math.sin(now * 0.015 + childIndex) * 0.17);
+          });
+          visual.interiorFlames.forEach((flame, flameIndex) => {
+            const pulse = flame.userData.baseScale * (0.76 + Math.sin(now * 0.009 + flameIndex) * 0.18);
+            flame.position.y = 0.04 + (Math.sin(now * 0.006 + flame.userData.phase * Math.PI * 2) + 1) * 0.055;
+            flame.scale.setScalar(pulse);
+          });
+        } else if (visual.type === "air-flame") {
+          visual.root.position.y += 0.006;
+          visual.root.children.forEach((flame, flameIndex) => flame.scale.setScalar(flame.userData.baseScale * (1 - t) * (0.9 + Math.sin(now * 0.02 + flameIndex) * 0.12)));
+        } else {
+          visual.root.children.forEach((child, childIndex) => {
+            if (child.geometry?.type === "RingGeometry") child.material.opacity = 0.24 + Math.sin(now * 0.009) * 0.08;
+            else child.scale.setScalar(0.82 + Math.sin(now * 0.015 + childIndex) * 0.17);
+          });
+        }
+        if (t < 1) continue;
+        disposeVisual(visual.root);
+        fireVisuals.splice(index, 1);
+      }
+    }
+
     function spawnSpeedTrail(start, end, color) {
       spawnBeam(start.clone().add(new THREE.Vector3(0, 0.7, 0)), end.clone().add(new THREE.Vector3(0, 0.7, 0)), color, 0.08, 0.32);
       spawnRing(start.clone().setY(0.08), color, 0.35, 1.6, 0.34);
@@ -5367,6 +5730,30 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         activeFloorWebs.splice(0).forEach((trap) => disposeVisual(trap.net));
         networkFloorWebs.clear();
       }
+    }
+
+    function resetFireState(clearVisuals = true) {
+      firePrimaryDownAt = 0;
+      fireChargeAllowed = false;
+      firePunchCooldownUntil = 0;
+      fireballCooldownUntil = 0;
+      fireDashCooldownUntil = 0;
+      fireUpDashCooldownUntil = 0;
+      fireRingCooldownUntil = 0;
+      firePunchUntil = 0;
+      fireThrowUntil = 0;
+      fireDashUntil = 0;
+      fireDashMode = "forward";
+      fireDashKeyHeld = false;
+      fireDashTrailAt = 0;
+      fireComboCount = 0;
+      fireComboExpiresAt = 0;
+      soloFireCombo = { target: null, count: 0, expiresAt: 0 };
+      soloFireBurns.length = 0;
+      soloFireZones.length = 0;
+      remoteFireDashes.clear();
+      playerForcedMotionUntil = 0;
+      if (clearVisuals) fireVisuals.splice(0).forEach((visual) => disposeVisual(visual.root));
     }
 
     function updateSpiderWebs(delta) {
@@ -7162,6 +7549,282 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return false;
     }
 
+    function fireAimDirection() {
+      const origin = threeFromCannon(playerBody.position).add(new THREE.Vector3(0, 0.72, 0));
+      const aim = getMouseAimPoint(62);
+      const direction = aim.sub(origin);
+      if (direction.lengthSq() < 0.01) direction.copy(getCameraForward());
+      return direction.normalize();
+    }
+
+    function closestFireDummy(origin, direction, range, radius = 1.1) {
+      let best = null;
+      let bestDistance = Infinity;
+      dynamicDummies.forEach((dummy) => {
+        if (dummy.health <= 0 || dummy.isHeld) return;
+        const point = threeFromCannon(dummy.body.position).add(new THREE.Vector3(0, 0.72, 0));
+        const offset = point.clone().sub(origin);
+        const along = offset.dot(direction);
+        if (along < 0 || along > range) return;
+        const miss = offset.addScaledVector(direction, -along).length();
+        if (miss > radius || along >= bestDistance) return;
+        best = dummy;
+        bestDistance = along;
+      });
+      return best;
+    }
+
+    function applySoloFireBurn(dummy, attackerTag = "fire") {
+      const existing = soloFireBurns.find((burn) => burn.dummy === dummy);
+      if (existing) {
+        existing.ticksLeft = 3;
+        existing.nextTickAt = performance.now() + 600;
+        spawnBurnVisual(`solo-${dummy.body.id}`, Date.now() + 2100, dummy);
+        return;
+      }
+      soloFireBurns.push({ dummy, ticksLeft: 3, nextTickAt: performance.now() + 600, attackerTag });
+      spawnBurnVisual(`solo-${dummy.body.id}`, Date.now() + 2100, dummy);
+    }
+
+    function performFlamePunch() {
+      const now = performance.now();
+      if (now < firePunchCooldownUntil) return false;
+      firePunchCooldownUntil = now + FIRE_PUNCH_COOLDOWN;
+      firePunchUntil = now + 360;
+      const origin = threeFromCannon(playerBody.position).add(new THREE.Vector3(0, 0.72, 0));
+      const direction = fireAimDirection().setY(0).normalize();
+      const impact = origin.clone().addScaledVector(direction, 2.2);
+      spawnBeam(playerParts.rightHand.getWorldPosition(new THREE.Vector3()), impact, 0xff6a00, 0.075, 0.18);
+      spawnBeam(playerParts.rightHand.getWorldPosition(new THREE.Vector3()), impact, 0xfff2a8, 0.032, 0.15);
+      spawnBurst(impact, 0xffd21f, 10, 0.36);
+      playSfx("flamePunch");
+      if (!onlineMode) {
+        const dummy = closestFireDummy(origin, direction, 3.2, 1.15);
+        if (dummy) {
+          damageDummy(dummy, dummy.isMinion ? 8 : 11);
+          const validCombo = soloFireCombo.target === dummy && now <= soloFireCombo.expiresAt;
+          soloFireCombo = { target: dummy, count: validCombo ? soloFireCombo.count + 1 : 1, expiresAt: now + 1600 };
+          fireComboCount = soloFireCombo.count;
+          fireComboExpiresAt = soloFireCombo.expiresAt;
+          if (soloFireCombo.count >= 3) {
+            applySoloFireBurn(dummy, "combo");
+            fireComboCount = 3;
+            fireComboExpiresAt = now + 1000;
+            firePunchCooldownUntil = now + 1000;
+            soloFireCombo = { target: null, count: 0, expiresAt: 0 };
+          }
+        } else {
+          soloFireCombo = { target: null, count: 0, expiresAt: 0 };
+          fireComboCount = 0;
+          fireComboExpiresAt = 0;
+        }
+      }
+      return true;
+    }
+
+    function releaseFirePrimary() {
+      const now = performance.now();
+      const heldMs = Math.max(0, now - firePrimaryDownAt);
+      const direction = fireAimDirection();
+      const origin = playerParts.rightHand.getWorldPosition(new THREE.Vector3()).addScaledVector(direction, 0.28);
+      if (onlineMode && multiplayerClient?.id) {
+        multiplayerClient.sendAction({ kind: "fire-primary-release", direction: direction.toArray() });
+        if (!fireChargeAllowed || heldMs < FIREBALL_MIN_CHARGE) performFlamePunch();
+      } else if (fireChargeAllowed && heldMs >= FIREBALL_MIN_CHARGE) {
+        const charge = THREE.MathUtils.clamp((heldMs - FIREBALL_MIN_CHARGE) / (FIREBALL_MAX_CHARGE - FIREBALL_MIN_CHARGE), 0, 1);
+        const range = THREE.MathUtils.lerp(24, 46, charge);
+        const target = closestFireDummy(origin, direction, range, THREE.MathUtils.lerp(0.85, 1.8, charge));
+        const end = target ? threeFromCannon(target.body.position).add(new THREE.Vector3(0, 0.72, 0)) : origin.clone().addScaledVector(direction, range);
+        spawnFireballVisual(origin, end, charge, THREE.MathUtils.lerp(360, 620, end.distanceTo(origin) / range));
+        fireballCooldownUntil = now + FIREBALL_COOLDOWN;
+        fireThrowUntil = now + 520;
+        if (target) {
+          damageDummy(target, Math.round(18 + charge * 16));
+          applySoloFireBurn(target, "fireball");
+        }
+      } else {
+        performFlamePunch();
+      }
+      firePrimaryDownAt = 0;
+      fireChargeAllowed = false;
+    }
+
+    function useFlameDash() {
+      if (selectedPower !== "fire" || localDefeat || duelInputLocked || grabbedById) return false;
+      const now = performance.now();
+      if (now < fireDashCooldownUntil) {
+        showMessage(`Flame Dash cooldown: ${Math.ceil((fireDashCooldownUntil - now) / 1000)}s`, 650);
+        playSfx("cooldownDeny");
+        return false;
+      }
+      const direction = getCameraForward(true);
+      const start = threeFromCannon(playerBody.position);
+      const end = clampPointToMap(start.clone().addScaledVector(direction, FIRE_DASH_DISTANCE));
+      const points = Array.from({ length: 17 }, (_, index) => start.clone().lerp(end, index / 16).toArray());
+      fireDashCooldownUntil = now + FIRE_DASH_COOLDOWN;
+      fireDashUntil = now + FIRE_DASH_DURATION;
+      fireDashMode = "forward";
+      playerForcedMotionUntil = fireDashUntil;
+      fireDashDirection.copy(direction);
+      fireDashTrailAt = now;
+      fireDashLastTrailPosition.copy(start);
+      playerBody.velocity.x = direction.x * 27;
+      playerBody.velocity.z = direction.z * 27;
+      playerBody.velocity.y = Math.max(playerBody.velocity.y, isGrounded() ? 0.4 : 1.2);
+      playerBody.wakeUp();
+      spawnBurst(start.clone().add(new THREE.Vector3(0, 0.55, 0)), 0xff6a00, 18, 0.5);
+      playSfx("flameDash");
+      if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "fire-dash", direction: direction.toArray() });
+      else soloFireZones.push({ type: "trail", points: points.map((point) => new THREE.Vector3().fromArray(point)), radius: 1.35, expiresAt: now + 2800, nextTicks: new Map() });
+      return true;
+    }
+
+    function useFlameUpDash() {
+      if (selectedPower !== "fire" || localDefeat || duelInputLocked || grabbedById || isGrounded()) return false;
+      const now = performance.now();
+      if (now < fireUpDashCooldownUntil) {
+        showMessage(`Flame Up-Dash cooldown: ${Math.ceil((fireUpDashCooldownUntil - now) / 1000)}s`, 650);
+        playSfx("cooldownDeny");
+        return false;
+      }
+      const start = threeFromCannon(playerBody.position);
+      fireUpDashCooldownUntil = now + FIRE_DASH_COOLDOWN;
+      fireDashUntil = now + FIRE_UP_DASH_DURATION;
+      fireDashMode = "up";
+      playerForcedMotionUntil = fireDashUntil;
+      fireDashTrailAt = now;
+      fireDashLastTrailPosition.copy(start);
+      playerBody.velocity.y = FIRE_UP_DASH_VELOCITY;
+      playerBody.velocity.x *= 0.72;
+      playerBody.velocity.z *= 0.72;
+      playerBody.wakeUp();
+      spawnAirFlamePatch(start.clone().add(new THREE.Vector3(0, -0.32, 0)), 700);
+      playSfx("flameDash");
+      showMessage("Flame Up-Dash", 700);
+      if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "fire-up-dash" });
+      return true;
+    }
+
+    function placeFireRing() {
+      if (selectedPower !== "fire") return false;
+      const now = performance.now();
+      if (now < fireRingCooldownUntil) {
+        showMessage(`Fire Ring cooldown: ${Math.ceil((fireRingCooldownUntil - now) / 1000)}s`, 700);
+        playSfx("cooldownDeny");
+        return false;
+      }
+      const origin = threeFromCannon(playerBody.position);
+      const aimed = getMouseAimPoint(20);
+      const flat = aimed.clone().sub(origin).setY(0);
+      if (flat.length() > 14) flat.setLength(14);
+      const point = clampPointToMap(origin.clone().add(flat));
+      point.y = origin.y;
+      fireRingCooldownUntil = now + FIRE_RING_COOLDOWN;
+      spawnFireRingVisual(point, 5.5, Date.now() + 5000);
+      spawnBurst(point.clone().add(new THREE.Vector3(0, 0.22, 0)), 0xffd21f, 20, 0.62);
+      if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "fire-ring", point: point.toArray() });
+      else soloFireZones.push({ type: "ring", point, radius: 5.5, expiresAt: now + 5000, nextTicks: new Map(), ticks: new Map() });
+      showMessage("Fire Ring — control the burn zone", 950);
+      return true;
+    }
+
+    function pointToFireTrailDistance(point, points) {
+      let best = Infinity;
+      for (let index = 1; index < points.length; index += 1) {
+        const start = points[index - 1];
+        const end = points[index];
+        const segment = end.clone().sub(start);
+        const t = THREE.MathUtils.clamp(point.clone().sub(start).dot(segment) / Math.max(0.001, segment.lengthSq()), 0, 1);
+        best = Math.min(best, point.distanceTo(start.clone().addScaledVector(segment, t)));
+      }
+      return best;
+    }
+
+    function updateSoloFireDamage(now) {
+      for (let index = soloFireBurns.length - 1; index >= 0; index -= 1) {
+        const burn = soloFireBurns[index];
+        if (burn.dummy.health <= 0 || burn.ticksLeft <= 0) {
+          soloFireBurns.splice(index, 1);
+          continue;
+        }
+        if (now < burn.nextTickAt) continue;
+        burn.nextTickAt += 600;
+        burn.ticksLeft -= 1;
+        damageDummy(burn.dummy, 2);
+        spawnAirFlamePatch(threeFromCannon(burn.dummy.body.position).add(new THREE.Vector3(0, 0.45, 0)), 520);
+      }
+      for (let zoneIndex = soloFireZones.length - 1; zoneIndex >= 0; zoneIndex -= 1) {
+        const zone = soloFireZones[zoneIndex];
+        if (now >= zone.expiresAt) {
+          soloFireZones.splice(zoneIndex, 1);
+          continue;
+        }
+        dynamicDummies.forEach((dummy) => {
+          if (dummy.health <= 0) return;
+          const nextAt = zone.nextTicks.get(dummy) || 0;
+          if (now < nextAt) return;
+          const point = threeFromCannon(dummy.body.position);
+          const inside = zone.type === "ring" ? point.distanceTo(zone.point) <= zone.radius : pointToFireTrailDistance(point, zone.points) <= zone.radius;
+          if (!inside) return;
+          const count = zone.ticks?.get(dummy) || 0;
+          if (zone.type === "ring" && count >= 5) return;
+          zone.nextTicks.set(dummy, now + (zone.type === "ring" ? 1000 : 700));
+          zone.ticks?.set(dummy, count + 1);
+          damageDummy(dummy, zone.type === "ring" ? 5 : 4);
+          applySoloFireBurn(dummy, zone.type);
+        });
+      }
+    }
+
+    function updateFireGameplay(now) {
+      if (selectedPower !== "fire" || gamePaused || localDefeat || duelInputLocked) {
+        fireDashKeyHeld = false;
+        return;
+      }
+      const dashPressed = keys.has("ShiftLeft") || keys.has("ShiftRight") || keys.has("GamepadShift");
+      if (dashPressed && !fireDashKeyHeld) useFlameDash();
+      fireDashKeyHeld = dashPressed;
+      if (now < fireDashUntil) {
+        if (fireDashMode === "up") {
+          playerBody.velocity.y = FIRE_UP_DASH_VELOCITY;
+          playerBody.velocity.x *= 0.985;
+          playerBody.velocity.z *= 0.985;
+        } else {
+          playerBody.velocity.x = fireDashDirection.x * 27;
+          playerBody.velocity.z = fireDashDirection.z * 27;
+        }
+        playerBody.wakeUp();
+        if (now - fireDashTrailAt >= 85) {
+          fireDashTrailAt = now;
+          const actualPoint = threeFromCannon(playerBody.position);
+          if (actualPoint.distanceToSquared(fireDashLastTrailPosition) > 0.04) {
+            const patchPoint = fireDashLastTrailPosition.clone().lerp(actualPoint, 0.5);
+            if (fireDashMode === "up") spawnAirFlamePatch(patchPoint, 620);
+            else spawnDashFlamePatch(patchPoint, 1250);
+            fireDashLastTrailPosition.copy(actualPoint);
+          }
+        }
+        if (fireDashMode !== "up" && Math.floor(now / 45) !== Math.floor((now - 16) / 45)) {
+          const trailPoint = threeFromCannon(playerBody.position).add(new THREE.Vector3((Math.random() - 0.5) * 0.7, 0.4, (Math.random() - 0.5) * 0.7));
+          spawnBurst(trailPoint, Math.random() > 0.35 ? 0xff6a00 : 0xffd21f, 3, 0.3);
+        }
+      }
+      if (firePrimaryDownAt && fireChargeAllowed && now - firePrimaryDownAt >= FIREBALL_MIN_CHARGE) {
+        const charge = THREE.MathUtils.clamp((now - firePrimaryDownAt - FIREBALL_MIN_CHARGE) / (FIREBALL_MAX_CHARGE - FIREBALL_MIN_CHARGE), 0, 1);
+        if (!lastFireChargeSparkAt) {
+          lastFireChargeSparkAt = now;
+          playSfx("fireballCharge");
+          showMessage("Charged Fireball — release to throw", 850);
+        }
+        if (now - lastFireChargeSparkAt >= 60) {
+          lastFireChargeSparkAt = now;
+          const hand = playerParts.rightHand.getWorldPosition(new THREE.Vector3());
+          spawnBurst(hand, charge > 0.55 ? 0xfff2a8 : 0xff6a00, 3, 0.26);
+        }
+      }
+      if (!onlineMode) updateSoloFireDamage(now);
+    }
+
     function broadcastPrimaryAttack() {
       if (!onlineMode || !multiplayerClient?.id) return;
       multiplayerClient.sendAction({ kind: "attack", power: selectedPower, name: `${selectedPower}-primary`, at: Date.now() });
@@ -7222,6 +7885,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         webLeftDownAt = performance.now();
         webHoldTriggered = false;
       }
+      if (selectedPower === "fire") {
+        firePrimaryDownAt = performance.now();
+        fireChargeAllowed = firePrimaryDownAt >= fireballCooldownUntil && firePrimaryDownAt >= firePunchCooldownUntil;
+        lastFireChargeSparkAt = 0;
+        if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "fire-primary-down" });
+        if (!fireChargeAllowed) showMessage("Fireball cooling — release for Flame Punch", 850);
+      }
     }
 
     function onAbilityUp() {
@@ -7253,6 +7923,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         }
         webLeftDownAt = 0;
         webHoldTriggered = false;
+      }
+      if (selectedPower === "fire") {
+        releaseFirePrimary();
+        primaryAttackArmed = false;
+        isPointerDown = false;
+        return;
       }
       if (primaryAttackArmed) broadcastPrimaryAttack();
       primaryAttackArmed = false;
@@ -7649,9 +8325,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerGroup.rotation.z = THREE.MathUtils.lerp(playerGroup.rotation.z, 0, Math.min(1, delta * 10));
       }
 
-      playerMaterialMain.color.setHex(selectedPower === "webs" ? 0xdc2626 : color);
-      playerParts.leftArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : color);
-      playerParts.rightArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : color);
+      playerMaterialMain.color.setHex(selectedPower === "webs" ? 0xdc2626 : selectedPower === "fire" ? 0xff7a00 : color);
+      playerParts.leftArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : selectedPower === "fire" ? 0xff3b1f : color);
+      playerParts.rightArmMesh.material.color.setHex(selectedPower === "webs" ? 0x2563eb : selectedPower === "fire" ? 0xff3b1f : color);
       playerParts.head.material.color.setHex(selectedPower === "robot" ? 0x111827 : 0xe5e7eb);
       playerParts.leftHand.material.color.setHex(selectedPower === "robot" ? 0x334155 : 0xf8fafc);
       playerParts.rightHand.material.color.setHex(selectedPower === "robot" ? 0x334155 : 0xf8fafc);
@@ -7661,6 +8337,16 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       playerParts.leftBlaster.visible = selectedPower === "robot";
       playerParts.rightBlaster.visible = selectedPower === "robot";
       playerParts.robotShield.visible = selectedPower === "robot" && robotShieldMode;
+      playerParts.leftFireCuff.visible = selectedPower === "fire";
+      playerParts.rightFireCuff.visible = selectedPower === "fire";
+      if (selectedPower === "fire") {
+        [playerParts.leftFireCuff, playerParts.rightFireCuff].forEach((cuff, index) => {
+          cuff.rotation.y += delta * (index ? -3.8 : 3.8);
+          const pulse = 1 + Math.sin(performance.now() * 0.016 + index) * 0.08;
+          cuff.scale.setScalar(pulse);
+          if (Math.random() < 0.025) spawnBurst(cuff.getWorldPosition(new THREE.Vector3()), index ? 0xff6a00 : 0xffd21f, 1, 0.22);
+        });
+      }
       playerParts.aura.material.color.setHex(color);
       playerParts.aura.material.opacity = flightLocked ? 0.58 : robotShieldMode ? 0.55 : 0.22 + moveIntensity * 0.18 + abilityPose * 0.22;
       playerParts.aura.scale.setScalar(flightLocked ? 1.28 + Math.sin(walkTime * 1.7) * 0.06 : robotShieldMode ? 1.28 + Math.sin(walkTime * 2) * 0.05 : 1 + moveIntensity * 0.18);
@@ -7918,6 +8604,41 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerParts.aura.material.opacity = webWallMoving ? 0.5 : 0.34;
       }
 
+      if (selectedPower === "fire" && performance.now() < firePunchUntil) {
+        const t = 1 - THREE.MathUtils.clamp((firePunchUntil - performance.now()) / 360, 0, 1);
+        const snap = Math.sin(t * Math.PI);
+        playerParts.torso.rotation.y = -0.38 + snap * 0.62;
+        playerParts.torso.rotation.x = -0.2 * snap;
+        playerParts.leftArm.rotation.set(-0.72, -0.12, -0.48);
+        playerParts.rightArm.rotation.set(-2.05 * snap, 0.24, 0.54);
+        playerParts.leftLeg.rotation.set(0.35 * snap, 0, 0.14);
+        playerParts.rightLeg.rotation.set(-0.32 * snap, 0, -0.14);
+        playerParts.aura.material.opacity = 0.72;
+      } else if (selectedPower === "fire" && (firePrimaryDownAt || performance.now() < fireThrowUntil)) {
+        const charge = firePrimaryDownAt ? THREE.MathUtils.clamp((performance.now() - firePrimaryDownAt) / FIREBALL_MAX_CHARGE, 0, 1) : 0.65;
+        playerParts.torso.rotation.x = -0.12 - charge * 0.18;
+        playerParts.leftArm.rotation.set(-1.15 - charge * 0.55, -0.18, -0.52);
+        playerParts.rightArm.rotation.set(-1.45 - charge * 0.45, 0.18, 0.55);
+        playerParts.aura.material.opacity = 0.5 + charge * 0.32;
+        playerParts.aura.scale.setScalar(1.2 + charge * 0.55);
+      } else if (selectedPower === "fire" && performance.now() < fireDashUntil && fireDashMode === "up") {
+        playerParts.torso.rotation.x = 0.08;
+        playerParts.leftArm.rotation.set(-2.45, -0.1, -0.3);
+        playerParts.rightArm.rotation.set(-2.45, 0.1, 0.3);
+        playerParts.leftLeg.rotation.set(0.38, 0, 0.18);
+        playerParts.rightLeg.rotation.set(-0.28, 0, -0.18);
+        playerParts.aura.material.opacity = 0.9;
+        playerParts.aura.scale.setScalar(1.78);
+      } else if (selectedPower === "fire" && performance.now() < fireDashUntil) {
+        playerParts.torso.rotation.x = -0.42;
+        playerParts.leftArm.rotation.set(0.42, 0, -0.45);
+        playerParts.rightArm.rotation.set(0.42, 0, 0.45);
+        playerParts.leftLeg.rotation.set(1.05, 0, 0.15);
+        playerParts.rightLeg.rotation.set(1.05, 0, -0.15);
+        playerParts.aura.material.opacity = 0.84;
+        playerParts.aura.scale.setScalar(1.65);
+      }
+
       if (selectedPower === "strength" && isPointerDown) {
         const charge = THREE.MathUtils.clamp((performance.now() - strengthChargeStart) / 1450, 0, 1);
         playerParts.leftArm.rotation.set(-1.05 - charge * 0.5, 0, -0.42);
@@ -8132,6 +8853,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         ? webWallWalkActive ? "Wall Walk" : "Web Swing — release Space"
         : flightTurboActive ? "Turbo Flight" : "Flight Mode";
       const healthPct = THREE.MathUtils.clamp(playerHealth / maxPlayerHealth(), 0, 1);
+      const comboActive = selectedPower === "fire" && fireComboCount > 0 && performance.now() < fireComboExpiresAt;
+      if (fireComboHud) {
+        fireComboHud.hidden = !comboActive;
+        if (comboActive) fireComboHud.textContent = fireComboCount >= 3 ? "BURN COMBO! · 3/3" : `COMBO STARTED · ${fireComboCount}/3`;
+      }
+      if (fireComboCount > 0 && performance.now() >= fireComboExpiresAt) fireComboCount = 0;
       const healthBackground = healthPct > 0.55
         ? "linear-gradient(90deg, #22c55e, #84cc16)"
         : healthPct > 0.25
@@ -8151,8 +8878,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       } else if (selectedPower === "jump" && megaLeapCharging) {
         const charge = THREE.MathUtils.clamp((performance.now() - megaLeapChargeStart) / 1150, 0, 1);
         chargeFill.style.width = `${Math.round(charge * 100)}%`;
+      } else if (selectedPower === "fire" && firePrimaryDownAt && fireChargeAllowed) {
+        const charge = THREE.MathUtils.clamp((performance.now() - firePrimaryDownAt) / FIREBALL_MAX_CHARGE, 0, 1);
+        chargeFill.style.width = `${Math.round(charge * 100)}%`;
+        chargeFill.style.background = "linear-gradient(90deg,#ffd21f,#ff6a00,#ff3b1f)";
       } else if (selectedPower !== "strength") {
         chargeFill.style.width = "0%";
+        chargeFill.style.background = "";
       }
       updateMobileButtonLabels(true);
     }
@@ -8194,6 +8926,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         updatePinnedDummy();
         updatePlayerControl(delta);
         updateSuperJump(delta);
+        updateFireGameplay(now);
       }
       updateFlightStrike();
       updateRobotShield();
@@ -8216,6 +8949,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       refreshWebCordVisual();
       updateEffects(delta);
       updateNetworkVisualAnimations(now);
+      updateFireVisuals(now);
       updateHud();
       shadowRefreshAccumulator += delta;
       if (shadowRefreshAccumulator >= SHADOW_REFRESH_INTERVAL) {
@@ -8245,6 +8979,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       divePending = false;
       setShiftLock(false, false);
       resetSpiderWebState(true);
+      resetFireState(true);
       flightFeatherCooldownUntil = 0;
       featherPoseUntil = 0;
       robotShieldMode = false;
@@ -8380,6 +9115,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       webWallDetachUntil = 0;
       webLeftDownAt = 0;
       webHoldTriggered = false;
+      firePrimaryDownAt = 0;
+      fireChargeAllowed = false;
+      fireDashKeyHeld = false;
       if (webCord) webCord.group.visible = false;
       if (strengthHeldBox || strengthHeldEnemy) toggleStrengthGrab();
       chargeFill.style.width = "0%";
@@ -8793,6 +9531,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         robot: { jump: "Lift", sprint: "Thrust", attack: "Beam", secondary: "Shield", view: "View" },
         jump: { jump: "Jump", sprint: "Run", attack: "Mega", secondary: "Skill", view: "View" },
         webs: { jump: webSwingActive ? "Release" : "Swing", sprint: "Run", attack: "Punch/Pull", secondary: "Net", view: "Lock" },
+        fire: { jump: "Jump/Up", sprint: "Dash", attack: "Punch/Charge", secondary: "Ring", view: "View" },
       }[selectedPower] || { jump: "Jump", sprint: "Sprint", attack: "Attack", secondary: "E", view: "View" };
 
       if (mobileJumpButton) mobileJumpButton.textContent = labels.jump;
@@ -8846,6 +9585,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       setMobileKey("Space", true);
+      if (selectedPower === "fire" && !isGrounded()) useFlameUpDash();
       if (selectedPower === "webs") {
         if (webWallWalkActive) jumpOffSpiderWall();
         else beginSpiderSwing();
@@ -9024,6 +9764,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         broadcastSecondaryAbility();
         return true;
       }
+      if (selectedPower === "fire") return placeFireRing();
       broadcastSecondaryAbility();
       return true;
     }
@@ -9223,6 +9964,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       keys.add(event.code);
+      if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "fire" && !isGrounded()) useFlameUpDash();
       if (/^Digit[1-9]$/.test(event.code) && gameStarted && !event.repeat) {
         selectHotbarSlot(Number(event.code.slice(5)) - 1);
         event.preventDefault();

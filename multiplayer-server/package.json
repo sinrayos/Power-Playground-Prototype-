@@ -9,7 +9,8 @@
     "check": "wrangler deploy --dry-run",
     "test:remote": "node test/remote-smoke.mjs",
     "test:local:duels": "node test/duels-local.mjs",
-    "test:local:rules": "node test/mode-rules-local.mjs"
+    "test:local:rules": "node test/mode-rules-local.mjs",
+    "test:local:fire": "node test/fire-local.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Power Playground (Prototype)</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-  <link rel="stylesheet" href="./src/styles.css?v=20260714-duel-lobby" />
+  <link rel="stylesheet" href="./src/styles.css?v=20260715-fire-guy" />
 </head>
 <body>
   <div id="usernameOverlay" hidden>
@@ -100,7 +100,7 @@
           <p>Hover or focus a name to reveal their playstyle. Click to lock them in.</p>
         </div>
         <div class="powerCategoryTabs" role="tablist" aria-label="Power Guy categories">
-          <button id="powerTabHeroes" class="active" type="button" role="tab" aria-selected="true" aria-controls="powerPageHeroes">Power Guys 01–08</button>
+          <button id="powerTabHeroes" class="active" type="button" role="tab" aria-selected="true" aria-controls="powerPageHeroes">Power Guys 01–09</button>
           <button id="powerTabExtra" type="button" role="tab" aria-selected="false" aria-controls="powerPageExtra">Extra</button>
         </div>
         <div id="powerPageHeroes" class="cards powerCardPage active" role="tabpanel" aria-labelledby="powerTabHeroes">
@@ -135,6 +135,10 @@
         <button class="powerCard" data-power="webs">
           <span class="heroNumber">08</span><strong>Spider Webs Guy</strong>
           <span class="heroDetails">A momentum fighter who makes every surface useful.<small>Swing, wall-walk, grapple obstacles, pull enemies, and lay web traps.</small></span>
+        </button>
+        <button class="powerCard" data-power="fire">
+          <span class="heroNumber">09</span><strong>Fire Guy</strong>
+          <span class="heroDetails">Pressure / Area Control / Punish Fighter.<small>Build heat with Flame Punch, charge fireballs, dash through fights, and own space with a Fire Ring.</small></span>
         </button>
         </div>
         <div id="powerPageExtra" class="cards powerCardPage" role="tabpanel" aria-labelledby="powerTabExtra" hidden>
@@ -177,6 +181,7 @@
     <div id="flyMeter" hidden><span>Fly-O-Meter</span><div><i id="flyMeterFill"></i></div><strong id="flyMeterState">Sprint to charge</strong></div>
     <div id="holdEscapeMeter" hidden><span>Escape Hold</span><div><i id="holdEscapeFill"></i></div><strong id="holdEscapeState">Mash Space</strong></div>
     <div id="flightBadge" hidden>Flight Mode</div>
+    <div id="fireComboHud" hidden>COMBO STARTED · 1/3</div>
   </aside>
   <section id="inventoryHud" aria-label="Inventory">
     <div class="bottomHealth">
@@ -207,6 +212,7 @@
             <option value="robot">Robot Suit Guy</option>
             <option value="jump">Super Jump Guy</option>
             <option value="webs">Spider Webs Guy</option>
+            <option value="fire">Fire Guy</option>
             <option value="training">Neutral Guy</option>
           </select>
           <button id="swapPowerButton" type="button">Switch Power</button>
@@ -272,6 +278,6 @@
       <button id="mobileAttackButton" class="mobileButton primary" type="button" data-control="attack">Attack</button>
     </div>
   </div>
-  <script type="module" src="./src/main.js?v=20260714-station-neutral"></script>
+  <script type="module" src="./src/main.js?v=20260715-fire-guy-7"></script>
 </body>
 </html>
