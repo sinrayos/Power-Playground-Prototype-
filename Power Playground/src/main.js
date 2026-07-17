@@ -3925,7 +3925,9 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function showLevitationBootsStarted() {
       const position = threeFromCannon(playerBody.position);
-      playerBody.velocity.y = Math.max(playerBody.velocity.y, 4.2);
+      // Replace the remaining jump velocity with the boots' original gentle
+      // lift so activation never carries a full jump into gravity-free motion.
+      playerBody.velocity.y = 0.6;
       playerBody.wakeUp();
       spawnRing(position.clone().add(new THREE.Vector3(0, -0.28, 0)), 0x60a5fa, 0.35, 1.65, 0.34);
       spawnBurst(position.clone().add(new THREE.Vector3(0, 0.25, 0)), 0x93c5fd, 8, 0.32);
@@ -8482,7 +8484,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       } else if (levitatingNow) {
         playerBody.wakeUp();
         playerBody.force.y += -world.gravity.y * playerBody.mass;
-        playerBody.velocity.y = THREE.MathUtils.lerp(playerBody.velocity.y, 0, Math.min(1, delta * 2.5));
+        playerBody.velocity.y = THREE.MathUtils.lerp(playerBody.velocity.y, 0, Math.min(1, delta * 8));
         playerBody.velocity.x = horizontalMove.x * speed;
         playerBody.velocity.z = horizontalMove.z * speed;
       } else if (jumpLeaping) {
@@ -8857,7 +8859,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerParts.aura.scale.setScalar(1.08 + bounce);
       }
 
-      if (!isGrounded() && !flightLocked && !divePending && !webWallWalkActive) {
+      if (!isGrounded() && !flightLocked && !divePending && !webWallWalkActive && !levitationBootsActive()) {
         playerParts.leftArm.rotation.set(-2.35, -0.12, -0.38);
         playerParts.rightArm.rotation.set(-2.35, 0.12, 0.38);
         playerParts.leftLeg.rotation.set(0.72, 0, 0.18);
