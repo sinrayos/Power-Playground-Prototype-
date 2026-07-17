@@ -19,6 +19,12 @@ const ROBOT_SHIELD_COOLDOWN = 5000;
 const TELEPORT_BACKSTAB_COOLDOWN = 1500;
 const PHASE_BOOTS_DURATION = 5000;
 const PHASE_BOOTS_COOLDOWN = 10000;
+const LEVITATION_BOOTS_DURATION = 6000;
+const LEVITATION_BOOTS_COOLDOWN = 10000;
+const APPROVED_ITEMS = new Map([
+  ["levitation-boots", { power: "telekinesis" }],
+]);
+const APPROVED_ITEM_ACTIONS = new Set(["inventory-equip", "levitation-boots-activate", "levitation-boots-start"]);
 const HOLD_ESCAPE_TAP_GAIN = 0.065;
 const HOLD_ESCAPE_DECAY_PER_SECOND = 0.12;
 const WEB_PULL_COOLDOWN = 1000;
@@ -216,7 +222,7 @@ export class GameRoom {
     const client = pair[0];
     const server = pair[1];
     const id = crypto.randomUUID();
-    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, fireChargeStartedAt: 0, lastFireballAt: 0, lastFireDashAt: 0, lastFireRingAt: 0, fireCombo: null, fireBurn: null, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, queueSlot: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
+    const player = { id, username: "Player", icon: "portrait-speed", power: "speed", map: "hub", mode: "hangout", state: null, health: 100, maxHealth: 100, pearls: 5, respawnAt: 0, defeatSequence: 0, activeDefeatId: null, grabbedBy: null, grabbedMode: null, holdEscapeProgress: 0, lastHoldEscapeTapAt: 0, webPulledBy: null, webPullEndsAt: 0, webTrappedBy: null, webTrappedUntil: 0, webTrapAnchor: null, lastAttackAt: 0, lastGrabAt: 0, lastTelekinesisGrabAt: 0, lastWebPullAt: 0, lastWebTrapAt: 0, lastFlightStrikeAt: 0, flightStrike: null, shieldActive: false, shieldEndsAt: 0, shieldCooldownUntil: 0, phaseBootsActive: false, phaseBootsEndsAt: 0, phaseBootsCooldownUntil: 0, equippedItem: null, levitationBootsActivated: false, levitationBootsActivatedAt: 0, levitationBootsActive: false, levitationBootsStartedAt: 0, levitationBootsEndsAt: 0, levitationBootsCooldownUntil: 0, airborneEvidenceAt: 0, airborneEvidenceUntil: 0, lastStateAt: 0, fireChargeStartedAt: 0, lastFireballAt: 0, lastFireDashAt: 0, lastFireRingAt: 0, fireCombo: null, fireBurn: null, lastTrainHitId: null, damageSession: 0, damageRound: 0, damageMatch: 0, queueMode: null, queueSlot: null, matchId: null, teamId: null, spawnProtectedUntil: 0, joinedAt: Date.now() };
 
     server.serializeAttachment(player);
     this.ctx.acceptWebSocket(server);
@@ -253,12 +259,15 @@ export class GameRoom {
     if (!player) return socket.close(1011, "Session unavailable");
 
     if (message.type === "hello") {
-      if (player.map !== String(message.map || "hub")) {
+      const resettingPlayer = Boolean(message.reset) || player.map !== String(message.map || "hub");
+      if (resettingPlayer) {
         this.releaseVictimsHeldBy(player.id);
         this.releaseWebVictimsBy(player.id);
         player.flightStrike = null;
         player.phaseBootsActive = false;
         player.phaseBootsEndsAt = 0;
+        player.equippedItem = null;
+        this.clearLevitationBoots(player, { cooldown: false, broadcast: true });
         this.clearFireEffectsBy(player.id);
       }
       const requestedMode = String(message.mode || player.mode || "hangout");
@@ -280,6 +289,8 @@ export class GameRoom {
         player.phaseBootsActive = false;
         player.phaseBootsEndsAt = 0;
         player.phaseBootsCooldownUntil = 0;
+        this.clearLevitationBoots(player, { cooldown: false, broadcast: false });
+        player.equippedItem = null;
         player.fireChargeStartedAt = 0;
         player.fireCombo = null;
         player.fireBurn = null;
@@ -300,6 +311,7 @@ export class GameRoom {
       const now = Date.now();
       this.updateMapHazards(now);
       if (player.respawnAt && now >= player.respawnAt && player.mode !== "duels") {
+        this.clearLevitationBoots(player, { cooldown: true, broadcast: true });
         player.health = player.maxHealth || maxHealthForPower(player.power);
         player.respawnAt = 0;
         player.activeDefeatId = null;
@@ -311,6 +323,7 @@ export class GameRoom {
       this.expireShield(player);
       this.expireWebStatus(player);
       this.expirePhaseBoots(player);
+      this.expireLevitationBoots(player, now);
       this.processFireEffects(now);
       const holder = player.grabbedBy ? this.players.get(player.grabbedBy) : null;
       if (player.grabbedBy && !holder) {
@@ -321,6 +334,13 @@ export class GameRoom {
       }
       const reportedPosition = safeVector(message.state.position);
       const previousPosition = safeVector(player.state?.position, reportedPosition);
+      const elapsedStateMs = Math.max(1, now - (player.lastStateAt || now));
+      const verticalSpeed = Math.abs(reportedPosition[1] - previousPosition[1]) * 1000 / elapsedStateMs;
+      if (player.state?.position && elapsedStateMs <= 350 && verticalSpeed >= 1.8) {
+        player.airborneEvidenceAt = now;
+        player.airborneEvidenceUntil = now + 800;
+      }
+      player.lastStateAt = now;
       const statePosition = player.webTrappedUntil > Date.now() && Array.isArray(player.webTrapAnchor)
         ? player.webTrapAnchor
         : reportedPosition;
@@ -334,6 +354,14 @@ export class GameRoom {
         phaseBootsActive: this.isPhaseBootsActive(player),
         phaseBootsEndsAt: player.phaseBootsEndsAt || 0,
         phaseBootsCooldownUntil: player.phaseBootsCooldownUntil || 0,
+        equippedItem: player.equippedItem || null,
+        levitationBootsActivated: Boolean(player.levitationBootsActivated),
+        levitationBootsActive: this.isLevitationBootsActive(player, now),
+        levitationBootsStartedAt: player.levitationBootsStartedAt || 0,
+        levitationBootsEndsAt: player.levitationBootsEndsAt || 0,
+        levitationBootsCooldownUntil: player.levitationBootsCooldownUntil || 0,
+        movementState: this.isLevitationBootsActive(player, now) ? "levitating" : "normal",
+        animationState: this.isLevitationBootsActive(player, now) ? "walking" : "normal",
       };
       this.savePlayer(socket, player);
       this.extendFireMovement(player, previousPosition, statePosition, now);
@@ -352,6 +380,11 @@ export class GameRoom {
       if (action.kind === "duel-rematch") return this.handleDuelRematch(player);
       if (action.kind === "duel-return") return this.returnPlayerToDuelLobby(player);
       if (player.health <= 0 || player.respawnAt) return;
+      if (APPROVED_ITEM_ACTIONS.has(action.kind)) {
+        if (action.kind === "inventory-equip") return this.handleInventoryEquip(player, action);
+        if (action.kind === "levitation-boots-activate") return this.handleLevitationBootsActivate(player);
+        if (action.kind === "levitation-boots-start") return this.handleLevitationBootsStart(player);
+      }
       if (action.kind === "strength-grab-player") return this.handleStrengthGrab(player, action);
       if (action.kind === "strength-throw-player") return this.handleStrengthThrow(player, action);
       if (action.kind === "telekinesis-grab-player") return this.handleTelekinesisGrab(player, action);
@@ -496,6 +529,7 @@ export class GameRoom {
     for (const trail of this.fireTrails.values()) candidates.push(trail.nextProcessAt || trail.expiresAt);
     for (const ring of this.fireRings.values()) candidates.push(ring.nextProcessAt || ring.expiresAt);
     for (const projectile of this.fireProjectiles.values()) candidates.push(projectile.nextProcessAt || projectile.expiresAt);
+    for (const player of this.players.values()) if (player.levitationBootsActive && player.levitationBootsEndsAt) candidates.push(player.levitationBootsEndsAt);
     if (!candidates.length) return;
     const next = Math.max(Date.now() + 50, Math.min(...candidates));
     this.ctx.storage.setAlarm(next).catch(() => {});
@@ -514,7 +548,9 @@ export class GameRoom {
 
   async alarm() {
     await this.ready;
-    this.processFireEffects(Date.now());
+    const now = Date.now();
+    for (const player of this.players.values()) this.expireLevitationBoots(player, now);
+    this.processFireEffects(now);
     this.advanceDuelState();
   }
 
@@ -677,6 +713,8 @@ export class GameRoom {
       player.fireChargeStartedAt = 0;
       player.fireCombo = null;
       player.fireBurn = null;
+      this.clearLevitationBoots(player, { cooldown: false, broadcast: false });
+      player.equippedItem = null;
       this.clearFireEffectsBy(player.id);
       player.damageRound = 0;
       player.state = { ...(player.state || {}), position: spawn, health: player.health };
@@ -719,7 +757,11 @@ export class GameRoom {
   }
 
   endDuelRound(match, scoringTeam) {
-    match.playerIds.forEach((id) => this.clearFireEffectsBy(id));
+    match.playerIds.forEach((id) => {
+      this.clearFireEffectsBy(id);
+      const player = this.players.get(id);
+      if (player) this.clearLevitationBoots(player, { cooldown: true, broadcast: true });
+    });
     const winnerTeam = Object.keys(match.scores).find((team) => match.scores[team] >= 5) || null;
     if (winnerTeam) {
       match.phase = "victory";
@@ -777,6 +819,8 @@ export class GameRoom {
     player.fireChargeStartedAt = 0;
     player.fireCombo = null;
     player.fireBurn = null;
+    this.clearLevitationBoots(player, { cooldown: false, broadcast: false });
+    player.equippedItem = null;
     this.clearFireEffectsBy(player.id);
     player.state = { ...(player.state || {}), position: [0, 1.2, 915], health: 100 };
     this.savePlayer(player.socket, player);
@@ -1425,6 +1469,123 @@ export class GameRoom {
     return player.power === "teleport" && Boolean(player.phaseBootsActive) && now < (player.phaseBootsEndsAt || 0);
   }
 
+  isLevitationBootsActive(player, now = Date.now()) {
+    return player.power === "telekinesis" && player.equippedItem === "levitation-boots" && Boolean(player.levitationBootsActive) && now < (player.levitationBootsEndsAt || 0);
+  }
+
+  canUseLevitationBoots(player, now = Date.now()) {
+    if (player.power !== "telekinesis" || player.equippedItem !== "levitation-boots") return false;
+    if (player.health <= 0 || player.respawnAt || player.grabbedBy || player.webPulledBy || player.webTrappedUntil > now || now < (player.spawnProtectedUntil || 0)) return false;
+    if (player.mode === "duels") {
+      const match = this.duelMatch;
+      if (!match || match.phase !== "round" || player.matchId !== match.id || match.eliminated.has(player.id)) return false;
+    }
+    return true;
+  }
+
+  broadcastLevitationBootsState(player, type = "levitation-boots-state") {
+    this.broadcastToMap(player.map, {
+      type,
+      id: player.id,
+      equippedItem: player.equippedItem || null,
+      activated: Boolean(player.levitationBootsActivated),
+      active: this.isLevitationBootsActive(player),
+      startedAt: player.levitationBootsStartedAt || 0,
+      endsAt: player.levitationBootsEndsAt || 0,
+      cooldownUntil: player.levitationBootsCooldownUntil || 0,
+      movementState: this.isLevitationBootsActive(player) ? "levitating" : "normal",
+      animationState: this.isLevitationBootsActive(player) ? "walking" : "normal",
+    });
+  }
+
+  clearLevitationBoots(player, { cooldown = true, broadcast = true } = {}) {
+    const now = Date.now();
+    const wasActive = Boolean(player.levitationBootsActive);
+    const changed = wasActive || Boolean(player.levitationBootsActivated) || Boolean(player.levitationBootsStartedAt) || Boolean(player.levitationBootsEndsAt) || (!cooldown && Boolean(player.levitationBootsCooldownUntil));
+    player.levitationBootsActivated = false;
+    player.levitationBootsActivatedAt = 0;
+    player.levitationBootsActive = false;
+    player.levitationBootsStartedAt = 0;
+    player.levitationBootsEndsAt = 0;
+    player.airborneEvidenceUntil = 0;
+    player.airborneEvidenceAt = 0;
+    if (wasActive && cooldown) player.levitationBootsCooldownUntil = now + LEVITATION_BOOTS_COOLDOWN;
+    if (!cooldown) player.levitationBootsCooldownUntil = 0;
+    if (changed) this.savePlayer(player.socket, player);
+    if (changed && broadcast) this.broadcastLevitationBootsState(player);
+    return changed;
+  }
+
+  handleInventoryEquip(player, action) {
+    const requested = action.item == null ? null : String(action.item);
+    const definition = requested ? APPROVED_ITEMS.get(requested) : null;
+    if (requested && (!definition || definition.power !== player.power)) return;
+    if (player.equippedItem === requested) {
+      this.send(player.socket, {
+        type: "inventory-item-state",
+        id: player.id,
+        equippedItem: player.equippedItem,
+        activated: Boolean(player.levitationBootsActivated),
+        active: this.isLevitationBootsActive(player),
+        endsAt: player.levitationBootsEndsAt || 0,
+        cooldownUntil: player.levitationBootsCooldownUntil || 0,
+      });
+      return;
+    }
+    if (player.equippedItem === "levitation-boots" && requested !== "levitation-boots") this.clearLevitationBoots(player, { cooldown: true, broadcast: false });
+    player.equippedItem = requested;
+    this.savePlayer(player.socket, player);
+    this.broadcastLevitationBootsState(player, "inventory-item-state");
+  }
+
+  handleLevitationBootsActivate(player) {
+    const now = Date.now();
+    this.expireLevitationBoots(player, now);
+    if (!this.canUseLevitationBoots(player, now)) return this.broadcastLevitationBootsState(player);
+    if (this.isLevitationBootsActive(player, now) || player.levitationBootsActivated) return this.broadcastLevitationBootsState(player);
+    if (now < (player.levitationBootsCooldownUntil || 0)) {
+      this.send(player.socket, { type: "ability-cooldown", ability: "levitation-boots", cooldownUntil: player.levitationBootsCooldownUntil });
+      return;
+    }
+    player.levitationBootsActivated = true;
+    player.levitationBootsActivatedAt = now;
+    this.savePlayer(player.socket, player);
+    this.broadcastLevitationBootsState(player);
+  }
+
+  handleLevitationBootsStart(player) {
+    const now = Date.now();
+    this.expireLevitationBoots(player, now);
+    if (!this.canUseLevitationBoots(player, now) || !player.levitationBootsActivated || this.isLevitationBootsActive(player, now)) return this.broadcastLevitationBootsState(player);
+    if (now > (player.airborneEvidenceUntil || 0) || (player.airborneEvidenceAt || 0) < (player.levitationBootsActivatedAt || now)) {
+      this.send(player.socket, { type: "ability-cooldown", ability: "levitation-boots-airborne", cooldownUntil: now });
+      return;
+    }
+    player.levitationBootsActivated = false;
+    player.levitationBootsActivatedAt = 0;
+    player.levitationBootsActive = true;
+    player.levitationBootsStartedAt = now;
+    player.levitationBootsEndsAt = now + LEVITATION_BOOTS_DURATION;
+    player.levitationBootsCooldownUntil = player.levitationBootsEndsAt + LEVITATION_BOOTS_COOLDOWN;
+    player.airborneEvidenceUntil = 0;
+    player.airborneEvidenceAt = 0;
+    this.savePlayer(player.socket, player);
+    this.broadcastLevitationBootsState(player);
+    this.scheduleDuelTick();
+  }
+
+  expireLevitationBoots(player, now = Date.now()) {
+    if (!player.levitationBootsActive || now < (player.levitationBootsEndsAt || 0)) return false;
+    const endedAt = player.levitationBootsEndsAt || now;
+    player.levitationBootsActive = false;
+    player.levitationBootsStartedAt = 0;
+    player.levitationBootsEndsAt = 0;
+    player.levitationBootsCooldownUntil = Math.max(player.levitationBootsCooldownUntil || 0, endedAt + LEVITATION_BOOTS_COOLDOWN);
+    this.savePlayer(player.socket, player);
+    this.broadcastLevitationBootsState(player);
+    return true;
+  }
+
   handlePhaseBoots(player) {
     const now = Date.now();
     this.expirePhaseBoots(player, now);
@@ -2016,6 +2177,7 @@ export class GameRoom {
     target.fireChargeStartedAt = 0;
     target.fireCombo = null;
     target.fireBurn = null;
+    this.clearLevitationBoots(target, { cooldown: true, broadcast: true });
     this.clearFireEffectsBy(target.id);
     this.clearWebStatus(target);
     this.releaseVictimsHeldBy(target.id);

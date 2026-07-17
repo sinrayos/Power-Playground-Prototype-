@@ -18,6 +18,8 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     const ROBOT_SHOT_COOLDOWN = 850;
     const PHASE_BOOTS_DURATION = 5000;
     const PHASE_BOOTS_COOLDOWN = 10000;
+    const LEVITATION_BOOTS_DURATION = 6000;
+    const LEVITATION_BOOTS_COOLDOWN = 10000;
     const FIRE_PUNCH_COOLDOWN = 450;
     const FIREBALL_MIN_CHARGE = 1000;
     const FIREBALL_MAX_CHARGE = 2600;
@@ -43,6 +45,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         <path d="M38 38h14c3 0 4 2 4 4 0 4-3 7-8 7H30v-4c0-4 3-7 8-7z" fill="#facc15" stroke="#713f12" stroke-width="3" stroke-linejoin="round"/>
         <path d="M18 36v-9h11v12M45 36v-9H34v12" fill="#fbbf24" stroke="#713f12" stroke-width="3" stroke-linejoin="round"/>
         <path d="M18 43h13M33 43h17" stroke="#fff7ad" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    `;
+    const LEVITATION_BOOTS_ICON = `
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M14 31V18h14v21H13c-4 0-7-3-7-7v-1h8zM36 18h14v13h8v1c0 4-3 7-7 7H36V18z" fill="#2563eb" stroke="#102a66" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M12 42c-5 0-8 3-9 8 5 0 9-1 12-5-1 4 1 7 5 9 2-6 0-11-5-14M52 42c5 0 8 3 9 8-5 0-9-1-12-5 1 4-1 7-5 9-2-6 0-11 5-14" fill="#dbeafe" stroke="#60a5fa" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M9 35h19M36 35h19" stroke="#93c5fd" stroke-width="3" stroke-linecap="round"/>
       </svg>
     `;
 
@@ -126,6 +135,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let phaseCollisionApplied = null;
     let phaseSolidifyingUntilClear = false;
     const phaseFadedRoots = new Map();
+    let levitationBootsActivated = false;
+    let levitationBootsActiveUntil = 0;
+    let levitationBootsCooldownUntil = 0;
+    let levitationBootsPending = false;
+    let levitationBootsStartPending = false;
+    let levitationBootsExpiredAnnounced = true;
+    let levitationAirEffectTimer = 0;
     let telekinesisHoldDistance = 5;
     let telekinesisSlamCooldownUntil = 0;
     let telekinesisHeldPlayer = null;
@@ -146,6 +162,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     let selectedHotbarIndex = null;
     let speedPearlCount = 0;
     let hotbarRefreshAt = 0;
+    let hotbarRenderSignature = "";
     let pearlThrowPoseUntil = 0;
     let strongSwordSlashUntil = 0;
     let strongSwordCooldownUntil = 0;
@@ -2487,6 +2504,45 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       rightPhaseBootAura: rightPhaseBoot.aura,
     });
 
+    const levitationBootMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.38, metalness: 0.16, emissive: 0x102a66, emissiveIntensity: 0.16 });
+    const levitationWingMat = new THREE.MeshStandardMaterial({ color: 0xdbeafe, roughness: 0.52, metalness: 0, emissive: 0x60a5fa, emissiveIntensity: 0.1, side: THREE.DoubleSide });
+    function addLevitationBoot(foot, side) {
+      const root = new THREE.Group();
+      root.visible = false;
+      root.userData.levitationBootVisual = true;
+      foot.add(root);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.18, 0.43), levitationBootMat.clone());
+      boot.position.set(0, 0.015, 0.015);
+      boot.castShadow = true;
+      boot.receiveShadow = true;
+      root.add(boot);
+      const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.24, 0.23), levitationBootMat.clone());
+      cuff.position.set(0, 0.16, -0.075);
+      cuff.castShadow = true;
+      root.add(cuff);
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.13, 0.12, -0.2);
+      wing.rotation.y = side * 0.22;
+      root.add(wing);
+      for (let index = 0; index < 3; index += 1) {
+        const feather = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.13 + index * 0.035, 4, 8), levitationWingMat.clone());
+        feather.position.set(side * (0.045 + index * 0.035), index * 0.035, -index * 0.018);
+        feather.rotation.z = side * (0.72 + index * 0.12);
+        feather.rotation.x = Math.PI / 2;
+        feather.castShadow = true;
+        wing.add(feather);
+      }
+      return { root, wing };
+    }
+    const leftLevitationBoot = addLevitationBoot(leftFoot, -1);
+    const rightLevitationBoot = addLevitationBoot(rightFoot, 1);
+    Object.assign(playerParts, {
+      leftLevitationBoot: leftLevitationBoot.root,
+      rightLevitationBoot: rightLevitationBoot.root,
+      leftLevitationWing: leftLevitationBoot.wing,
+      rightLevitationWing: rightLevitationBoot.wing,
+    });
+
     const heldPearl = makePart(
       new THREE.SphereGeometry(0.13, 18, 14),
       new THREE.MeshStandardMaterial({ color: 0xff4fb8, roughness: 0.32, metalness: 0.05, emissive: 0x7c1d5a, emissiveIntensity: 0.18 }),
@@ -2621,6 +2677,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       "torso", "chest", "head", "cape", "leftArm", "rightArm", "leftLeg", "rightLeg",
       "leftHand", "rightHand", "leftFoot", "rightFoot", "heldPearl", "strongSword",
       "leftPhaseBoot", "rightPhaseBoot", "leftPhaseBootAura", "rightPhaseBootAura",
+      "leftLevitationBoot", "rightLevitationBoot", "leftLevitationWing", "rightLevitationWing",
       "robotArmorGroup", "leftBlaster", "rightBlaster", "robotShield", "leftFireCuff", "rightFireCuff", "aura"
     ];
 
@@ -2712,6 +2769,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       });
     }
 
+    function setRemoteLevitationBoots(remote, state = {}) {
+      if (!remote) return;
+      remote.equippedItem = state.equippedItem || null;
+      remote.levitationBootsActivated = Boolean(state.levitationBootsActivated);
+      remote.levitationBootsActive = Boolean(state.levitationBootsActive);
+      remote.levitationBootsActiveUntil = remote.levitationBootsActive ? networkTimeToPerformance(state.levitationBootsEndsAt) : 0;
+      const visible = remote.power === "telekinesis" && remote.equippedItem === "levitation-boots";
+      if (remote.parts.leftLevitationBoot) remote.parts.leftLevitationBoot.visible = visible;
+      if (remote.parts.rightLevitationBoot) remote.parts.rightLevitationBoot.visible = visible;
+    }
+
     function createRemotePlayer(id, power = "speed", username = "Player", health = 100, icon = "portrait-speed") {
       const sourceNodes = [];
       playerGroup.traverse((node) => sourceNodes.push(node));
@@ -2733,7 +2801,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       group.add(tag.sprite);
       const remoteWebCord = createWebCord();
       scene.add(group);
-      const remote = { id, power, username, health, icon, group, parts, tag, webCord: remoteWebCord, webWrap: null, webTrappedUntil: 0, target: new THREE.Vector3(), targetQuaternion: new THREE.Quaternion(), web: null, carryKey: null, flightSprint: false, flightTurbo: false, phaseBootsActive: false, phaseBootsActiveUntil: 0 };
+      const remote = { id, power, username, health, icon, group, parts, tag, webCord: remoteWebCord, webWrap: null, webTrappedUntil: 0, target: new THREE.Vector3(), targetQuaternion: new THREE.Quaternion(), web: null, carryKey: null, flightSprint: false, flightTurbo: false, phaseBootsActive: false, phaseBootsActiveUntil: 0, equippedItem: null, levitationBootsActivated: false, levitationBootsActive: false, levitationBootsActiveUntil: 0, levitationEffectAt: 0 };
       remotePlayers.set(id, remote);
       return remote;
     }
@@ -2910,6 +2978,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         flightTurboActive = false;
         divePending = false;
         robotShieldMode = false;
+        clearLocalLevitationBoots({ keepCooldown: true, announce: false });
         releaseActiveInputs();
         clearPlayerWebWrap();
         grabbedById = null;
@@ -3003,6 +3072,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         existing.shieldActive = Boolean(player.shieldActive);
         if (existing.parts.robotShield) existing.parts.robotShield.visible = existing.shieldActive;
         setRemotePhaseBoots(existing, Boolean(player.phaseBootsActive), networkTimeToPerformance(player.phaseBootsEndsAt));
+        setRemoteLevitationBoots(existing, player);
         if (player.state) applyRemoteState(player.id, player.state);
         return existing;
       }
@@ -3011,6 +3081,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       remote.shieldActive = Boolean(player.shieldActive);
       if (remote.parts.robotShield) remote.parts.robotShield.visible = remote.shieldActive;
       setRemotePhaseBoots(remote, Boolean(player.phaseBootsActive), networkTimeToPerformance(player.phaseBootsEndsAt));
+      setRemoteLevitationBoots(remote, player);
       if (player.state) applyRemoteState(player.id, player.state, true);
       return remote;
     }
@@ -3387,6 +3458,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       remote.flightSprint = Boolean(state.flightSprint);
       remote.flightTurbo = Boolean(state.flightTurbo);
       setRemotePhaseBoots(remote, Boolean(state.phaseBootsActive), networkTimeToPerformance(state.phaseBootsEndsAt));
+      setRemoteLevitationBoots(remote, state);
       if (Number.isFinite(state.health) && state.health !== remote.health) {
         remote.health = state.health;
         updatePlayerTag(remote.tag, remote.username, remote.health);
@@ -3549,6 +3621,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (packet.type === "shield-state") withoutNetworkVisualRelay(() => applyShieldState(packet));
       if (packet.type === "shield-blocked") withoutNetworkVisualRelay(() => applyShieldBlocked(packet));
       if (packet.type === "phase-boots-state") withoutNetworkVisualRelay(() => applyPhaseBootsState(packet));
+      if (packet.type === "levitation-boots-state" || packet.type === "inventory-item-state") withoutNetworkVisualRelay(() => applyLevitationBootsState(packet));
       if (packet.type === "ability-cooldown") applyAbilityCooldown(packet);
       if (packet.type === "web-pull-start") withoutNetworkVisualRelay(() => applyWebPullStart(packet));
       if (packet.type === "web-pull-end") applyWebPullEnd(packet);
@@ -3831,6 +3904,88 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return selectedPower === "teleport" && now < phaseBootsActiveUntil;
     }
 
+    function levitationBootsActive(now = performance.now()) {
+      return selectedPower === "telekinesis" && now < levitationBootsActiveUntil;
+    }
+
+    function clearLocalLevitationBoots({ keepCooldown = true, announce = false } = {}) {
+      const now = performance.now();
+      const wasActive = Boolean(levitationBootsActiveUntil);
+      const scheduledEnd = levitationBootsActiveUntil;
+      levitationBootsActivated = false;
+      levitationBootsActiveUntil = 0;
+      levitationBootsPending = false;
+      levitationBootsStartPending = false;
+      levitationBootsExpiredAnnounced = true;
+      levitationAirEffectTimer = 0;
+      if (wasActive && keepCooldown) levitationBootsCooldownUntil = (now >= scheduledEnd ? scheduledEnd : now) + LEVITATION_BOOTS_COOLDOWN;
+      if (!keepCooldown) levitationBootsCooldownUntil = 0;
+      if (announce && wasActive) showMessage(`Levitation ended. Boots cooling down: ${Math.max(1, Math.ceil((levitationBootsCooldownUntil - now) / 1000))}s`, 1400);
+    }
+
+    function showLevitationBootsStarted() {
+      const position = threeFromCannon(playerBody.position);
+      playerBody.velocity.y = Math.max(playerBody.velocity.y, 4.2);
+      playerBody.wakeUp();
+      spawnRing(position.clone().add(new THREE.Vector3(0, -0.28, 0)), 0x60a5fa, 0.35, 1.65, 0.34);
+      spawnBurst(position.clone().add(new THREE.Vector3(0, 0.25, 0)), 0x93c5fd, 8, 0.32);
+      playSfx("flightSprint");
+      showMessage("Levitation Boots active: 6s", 1100);
+    }
+
+    function setLocalLevitationBootsState(packet, announce = true) {
+      const now = performance.now();
+      const wasActivated = levitationBootsActivated;
+      const wasActive = Boolean(levitationBootsActiveUntil);
+      levitationBootsPending = false;
+      levitationBootsStartPending = false;
+      levitationBootsActivated = Boolean(packet.activated);
+      levitationBootsActiveUntil = packet.active ? networkTimeToPerformance(packet.endsAt) : 0;
+      levitationBootsCooldownUntil = Math.max(levitationBootsCooldownUntil, networkTimeToPerformance(packet.cooldownUntil));
+      levitationBootsExpiredAnnounced = !packet.active;
+      if (packet.equippedItem !== undefined && packet.equippedItem !== "levitation-boots" && selectedPower === "telekinesis") selectedHotbarIndex = null;
+      if (packet.active && !wasActive && announce) showLevitationBootsStarted();
+      else if (levitationBootsActivated && !wasActivated && announce) showMessage("Levitation Boots activated — jump, then press Space in the air", 1700);
+      else if (!packet.active && wasActive && announce) {
+        playSfx("cooldownDeny");
+        showMessage(`Levitation ended. Boots cooling down: ${Math.max(1, Math.ceil((levitationBootsCooldownUntil - now) / 1000))}s`, 1400);
+      }
+      renderHotbar();
+    }
+
+    function expireLocalLevitationBoots(now = performance.now()) {
+      if (!levitationBootsActiveUntil || now < levitationBootsActiveUntil || levitationBootsExpiredAnnounced) return;
+      levitationBootsExpiredAnnounced = true;
+      clearLocalLevitationBoots({ keepCooldown: true, announce: true });
+      renderHotbar();
+    }
+
+    function applyLevitationBootsState(packet) {
+      if (packet.id === multiplayerClient?.id) {
+        setLocalLevitationBootsState({
+          ...packet,
+          activated: packet.activated ?? packet.levitationBootsActivated,
+          active: packet.active ?? packet.levitationBootsActive,
+          endsAt: packet.endsAt ?? packet.levitationBootsEndsAt,
+          cooldownUntil: packet.cooldownUntil ?? packet.levitationBootsCooldownUntil,
+        }, true);
+        return;
+      }
+      const remote = remotePlayers.get(packet.id);
+      if (!remote) return;
+      const wasActive = remote.levitationBootsActive;
+      setRemoteLevitationBoots(remote, {
+        equippedItem: packet.equippedItem,
+        levitationBootsActivated: packet.activated,
+        levitationBootsActive: packet.active,
+        levitationBootsEndsAt: packet.endsAt,
+      });
+      if (remote.levitationBootsActive && !wasActive) {
+        spawnRing(remote.group.position.clone().add(new THREE.Vector3(0, -0.28, 0)), 0x60a5fa, 0.32, 1.45, 0.3);
+        playLocalSfx("flightSprint");
+      }
+    }
+
     function bodyOverlapsPlayer(body, radius = 0.54) {
       if (!body || body === playerBody || body.collisionFilterGroup === COLLISION_GROUP_BOUNDARY) return false;
       if (!["obstacle", "roof", "movableBox", "dummy"].includes(body.userData?.type)) return false;
@@ -4069,6 +4224,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         phaseBootsPending = false;
         phaseBootsCooldownUntil = Math.max(phaseBootsCooldownUntil, until);
         showMessage(`Phase Boots ready in ${Math.max(0.1, (phaseBootsCooldownUntil - performance.now()) / 1000).toFixed(1)}s`, 800);
+      }
+      if (packet.ability === "levitation-boots") {
+        levitationBootsPending = false;
+        levitationBootsStartPending = false;
+        levitationBootsCooldownUntil = Math.max(levitationBootsCooldownUntil, until);
+        showMessage(`Levitation Boots ready in ${Math.max(0.1, (levitationBootsCooldownUntil - performance.now()) / 1000).toFixed(1)}s`, 850);
+      }
+      if (packet.ability === "levitation-boots-airborne") {
+        levitationBootsStartPending = false;
+        showMessage("Jump first, then press Space while airborne", 1000);
+        playSfx("cooldownDeny");
       }
       if (packet.ability === "fire-punch") firePunchCooldownUntil = Math.max(firePunchCooldownUntil, until);
       if (packet.ability === "fireball") fireballCooldownUntil = Math.max(fireballCooldownUntil, until);
@@ -4554,6 +4720,11 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       for (const remote of remotePlayers.values()) {
         remote.group.position.lerp(remote.target, Math.min(1, delta * 13));
         remote.group.quaternion.slerp(remote.targetQuaternion, Math.min(1, delta * 13));
+        if (remote.levitationBootsActive && now >= remote.levitationBootsActiveUntil) remote.levitationBootsActive = false;
+        if (remote.levitationBootsActive && now >= remote.levitationEffectAt) {
+          spawnBurst(remote.group.position.clone().add(new THREE.Vector3(0, 0.05, 0)), 0x60a5fa, 3, 0.24);
+          remote.levitationEffectAt = now + 240;
+        }
         if (remote.web) updateSpecificWebCord(remote.webCord, new THREE.Vector3().fromArray(remote.web.start), new THREE.Vector3().fromArray(remote.web.end), true, remote.web.sag);
         else if (remote.webCord) remote.webCord.group.visible = false;
       }
@@ -4573,6 +4744,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         flyCharge: +flyMeterCharge.toFixed(3),
         phaseBootsActive: phaseBootsActive(now),
         phaseBootsEndsAt: phaseBootsActive(now) ? Date.now() + Math.max(0, phaseBootsActiveUntil - now) : 0,
+        equippedItem: selectedPower === "telekinesis" && selectedHotbarIndex === 0 ? "levitation-boots" : null,
+        levitationBootsActivated,
+        levitationBootsActive: levitationBootsActive(now),
+        levitationBootsEndsAt: levitationBootsActive(now) ? Date.now() + Math.max(0, levitationBootsActiveUntil - now) : 0,
+        movementState: levitationBootsActive(now) ? "levitating" : "normal",
+        animationState: levitationBootsActive(now) && moveIntensity > 0.08 ? "walking" : "normal",
       });
       if (pendingNetworkVisuals.length) multiplayerClient.sendAction({ kind: "visual-batch", events: pendingNetworkVisuals.splice(0, 96) });
       if (multiplayerClient.id === multiplayerHostId && now >= entitySendAt) {
@@ -7457,6 +7634,17 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
           quantity: active ? `${Math.ceil((phaseBootsActiveUntil - now) / 1000)}s` : cooling ? `${Math.ceil((phaseBootsCooldownUntil - now) / 1000)}s` : ""
         };
       }
+      if (selectedPower === "telekinesis" && index === 0) {
+        const now = performance.now();
+        const active = levitationBootsActive(now);
+        const cooling = !active && now < levitationBootsCooldownUntil;
+        return {
+          id: "levitationBoots",
+          name: "Levitation Boots",
+          icon: LEVITATION_BOOTS_ICON,
+          quantity: active ? `${Math.ceil((levitationBootsActiveUntil - now) / 1000)}s` : cooling ? `${Math.ceil((levitationBootsCooldownUntil - now) / 1000)}s` : levitationBootsActivated ? "ARMED" : ""
+        };
+      }
       return null;
     }
 
@@ -7466,9 +7654,13 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
     function renderHotbar() {
       if (!hotbar) return;
+      const items = Array.from({ length: 9 }, (_, index) => hotbarItemForSlot(index));
+      const signature = `${selectedPower}|${selectedHotbarIndex}|${items.map((item) => item ? `${item.id}:${item.quantity}` : "-").join("|")}`;
+      if (signature === hotbarRenderSignature && hotbar.children.length === 9) return;
+      hotbarRenderSignature = signature;
       hotbar.innerHTML = "";
       for (let i = 0; i < 9; i += 1) {
-        const item = hotbarItemForSlot(i);
+        const item = items[i];
         const slot = document.createElement("div");
         slot.className = `hotbarSlot${selectedHotbarIndex === i ? " selected" : ""}`;
         slot.innerHTML = `
@@ -7490,12 +7682,21 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       if (!gameStarted) return;
       const item = hotbarItemForSlot(index);
       if (!item) {
+        if (selectedPower === "telekinesis" && selectedHotbarIndex === 0) {
+          if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "inventory-equip", item: null });
+          else clearLocalLevitationBoots({ keepCooldown: true, announce: true });
+        }
         selectedHotbarIndex = null;
         renderHotbar();
         showMessage("Empty slot", 650);
         return;
       }
       selectedHotbarIndex = selectedHotbarIndex === index ? null : index;
+      if (selectedPower === "telekinesis") {
+        const equippedItem = selectedHotbarIndex === 0 ? "levitation-boots" : null;
+        if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "inventory-equip", item: equippedItem });
+        else if (!equippedItem) clearLocalLevitationBoots({ keepCooldown: true, announce: true });
+      }
       renderHotbar();
       showMessage(selectedHotbarIndex === null ? "Hands free" : `${item.name} equipped`, 850);
     }
@@ -7667,12 +7868,66 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       return true;
     }
 
+    function activateLevitationBoots() {
+      if (selectedPower !== "telekinesis") return false;
+      const now = performance.now();
+      if (levitationBootsActive(now)) {
+        showMessage(`Already levitating: ${Math.max(0.1, (levitationBootsActiveUntil - now) / 1000).toFixed(1)}s`, 750);
+        return true;
+      }
+      if (levitationBootsActivated) {
+        showMessage("Boots armed — jump, then press Space in the air", 1000);
+        return true;
+      }
+      if (now < levitationBootsCooldownUntil) {
+        showMessage(`Levitation Boots cooldown: ${Math.max(0.1, (levitationBootsCooldownUntil - now) / 1000).toFixed(1)}s`, 900);
+        playSfx("cooldownDeny");
+        return true;
+      }
+      if (onlineMode && multiplayerClient?.id) {
+        if (!levitationBootsPending) {
+          levitationBootsPending = true;
+          multiplayerClient.sendAction({ kind: "levitation-boots-activate" });
+          showMessage("Activating Levitation Boots...", 650);
+        }
+        return true;
+      }
+      levitationBootsActivated = true;
+      levitationBootsExpiredAnnounced = true;
+      renderHotbar();
+      showMessage("Levitation Boots activated — jump, then press Space in the air", 1700);
+      return true;
+    }
+
+    function tryStartLevitationBoots() {
+      if (selectedPower !== "telekinesis" || !levitationBootsActivated || levitationBootsActive() || levitationBootsStartPending) return false;
+      if (isGrounded()) {
+        showMessage("Jump first, then press Space while airborne", 850);
+        return false;
+      }
+      if (onlineMode && multiplayerClient?.id) {
+        levitationBootsStartPending = true;
+        multiplayerClient.sendAction({ kind: "levitation-boots-start" });
+        showMessage("Starting levitation...", 550);
+        return true;
+      }
+      const now = performance.now();
+      levitationBootsActivated = false;
+      levitationBootsActiveUntil = now + LEVITATION_BOOTS_DURATION;
+      levitationBootsCooldownUntil = levitationBootsActiveUntil + LEVITATION_BOOTS_COOLDOWN;
+      levitationBootsExpiredAnnounced = false;
+      showLevitationBootsStarted();
+      renderHotbar();
+      return true;
+    }
+
     function useEquippedItem() {
       const item = equippedHotbarItem();
       if (!item) return false;
       if (item.id === "teleportPearl") return throwTeleportPearl();
       if (item.id === "strongSword") return slashStrongSword();
       if (item.id === "phaseBoots") return activatePhaseBoots();
+      if (item.id === "levitationBoots") return levitationBootsActivated || levitationBootsActive() ? false : activateLevitationBoots();
       return false;
     }
 
@@ -8190,6 +8445,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
 
       const sprinting = isSpeedSprinting() && move.lengthSq() > 0.001;
       const groundedNow = isGrounded();
+      const levitatingNow = levitationBootsActive(controlNow);
       const flightSprinting = selectedPower === "flight" && !flightLocked && groundedNow && move.lengthSq() > 0.001 && (keys.has("ShiftLeft") || keys.has("ShiftRight") || keys.has("GamepadShift"));
       flightSprintActive = flightSprinting;
       flightTurboActive = selectedPower === "flight" && flightLocked && (keys.has("ShiftLeft") || keys.has("ShiftRight") || keys.has("GamepadShift"));
@@ -8223,6 +8479,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         playerBody.velocity.x = flyDirection.x * speed;
         playerBody.velocity.y = flyDirection.y * speed + 1.6;
         playerBody.velocity.z = flyDirection.z * speed;
+      } else if (levitatingNow) {
+        playerBody.wakeUp();
+        playerBody.force.y += -world.gravity.y * playerBody.mass;
+        playerBody.velocity.y = THREE.MathUtils.lerp(playerBody.velocity.y, 0, Math.min(1, delta * 2.5));
+        playerBody.velocity.x = horizontalMove.x * speed;
+        playerBody.velocity.z = horizontalMove.z * speed;
       } else if (jumpLeaping) {
         if (horizontalMove.lengthSq() > 0.001) {
           playerBody.velocity.x = THREE.MathUtils.lerp(playerBody.velocity.x, horizontalMove.x * speed, Math.min(1, delta * 1.6));
@@ -8903,6 +9165,28 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       } else {
         playerParts.aura.visible = false;
       }
+
+      const levitationEquipped = selectedPower === "telekinesis" && selectedHotbarIndex === 0;
+      const levitationActive = levitationBootsActive();
+      playerParts.leftLevitationBoot.visible = levitationEquipped;
+      playerParts.rightLevitationBoot.visible = levitationEquipped;
+      const wingBeat = Math.sin(performance.now() * 0.024) * (levitationActive ? 0.48 : 0.08);
+      playerParts.leftLevitationWing.rotation.z = levitationActive ? -0.18 - wingBeat : -0.08;
+      playerParts.rightLevitationWing.rotation.z = levitationActive ? 0.18 + wingBeat : 0.08;
+      if (levitationActive) {
+        playerParts.aura.visible = true;
+        playerParts.aura.material.color.setHex(0x60a5fa);
+        playerParts.aura.material.opacity = 0.34;
+        playerParts.aura.scale.setScalar(1.08 + Math.sin(performance.now() * 0.01) * 0.06);
+        levitationAirEffectTimer -= delta;
+        if (levitationAirEffectTimer <= 0) {
+          const left = playerParts.leftFoot.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.08, -0.08));
+          const right = playerParts.rightFoot.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.08, -0.08));
+          spawnBurst(left, 0x93c5fd, 2, 0.24);
+          spawnBurst(right, 0x60a5fa, 2, 0.24);
+          levitationAirEffectTimer = 0.22;
+        }
+      } else levitationAirEffectTimer = 0;
     }
 
     function syncVisuals() {
@@ -8939,9 +9223,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
     function updateHud() {
       const now = performance.now();
       expireLocalPhaseBoots(now);
+      expireLocalLevitationBoots(now);
       updatePhaseOverlapVisuals();
       applyPhaseCollisionState();
-      if (selectedPower === "teleport" && now >= hotbarRefreshAt) {
+      if ((selectedPower === "teleport" || selectedPower === "telekinesis") && now >= hotbarRefreshAt) {
         hotbarRefreshAt = now + 250;
         renderHotbar();
       }
@@ -8979,13 +9264,24 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
             ? `Boots ${Math.ceil((phaseBootsCooldownUntil - now) / 1000)}s`
             : ""
         : "";
-      const showModeBadge = (selectedPower === "flight" && flightMode) || (selectedPower === "webs" && (webSwingActive || webWallWalkActive)) || Boolean(robotCooldownText) || Boolean(phaseText);
+      const levitationText = selectedPower === "telekinesis"
+        ? levitationBootsActive(now)
+          ? `Levitation ${Math.max(0, (levitationBootsActiveUntil - now) / 1000).toFixed(1)}s`
+          : now < levitationBootsCooldownUntil
+            ? `Boots ${Math.ceil((levitationBootsCooldownUntil - now) / 1000)}s`
+            : levitationBootsActivated
+              ? "Boots armed — jump + Space"
+              : ""
+        : "";
+      const showModeBadge = (selectedPower === "flight" && flightMode) || (selectedPower === "webs" && (webSwingActive || webWallWalkActive)) || Boolean(robotCooldownText) || Boolean(phaseText) || Boolean(levitationText);
       flightBadge.hidden = !showModeBadge;
       flightBadge.style.display = showModeBadge ? "inline-block" : "none";
       flightBadge.textContent = selectedPower === "robot"
         ? robotCooldownText
         : selectedPower === "teleport"
         ? phaseText
+        : selectedPower === "telekinesis"
+        ? levitationText
         : selectedPower === "webs"
         ? webWallWalkActive ? "Wall Walk" : "Web Swing — release Space"
         : flightTurboActive ? "Turbo Flight" : "Flight Mode";
@@ -9196,10 +9492,12 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       [...phaseFadedRoots.keys()].forEach((root) => restorePhaseFadedRoot(root));
       phaseCollisionApplied = null;
       applyPhaseCollisionState();
+      clearLocalLevitationBoots({ keepCooldown: false, announce: false });
       telekinesisGrabCooldownUntil = 0;
       strengthUltraCooldownUntil = 0;
       selectedHotbarIndex = null;
       hotbarRefreshAt = 0;
+      hotbarRenderSignature = "";
       speedPearlCount = power === "speed" ? 5 : 0;
       pearlThrowPoseUntil = 0;
       strongSwordSlashUntil = 0;
@@ -9221,7 +9519,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       renderer.domElement.focus();
       if (isLikelyMobileDevice()) revealMobileControls();
       if (multiplayerClient?.socket?.readyState === WebSocket.OPEN) {
-        multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, mode: onlinePlayMode || "hangout", username: localUsername, icon: localPlayerIcon });
+        multiplayerClient.send({ type: "hello", power: selectedPower, map: selectedMap, mode: onlinePlayMode || "hangout", username: localUsername, icon: localPlayerIcon, reset: true });
       }
       connectToMultiplayer();
       roomPlayers.forEach((player) => ensureRemotePlayer(player));
@@ -9663,7 +9961,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         speed: { jump: "Jump", sprint: "Sprint", attack: "Kick", secondary: "Item", view: "View" },
         strength: { jump: "Jump", sprint: "Run", attack: "Charge", secondary: "Grab", view: "View" },
         teleport: { jump: "Jump", sprint: "Run", attack: equippedHotbarItem()?.id === "phaseBoots" ? "Phase" : "Punch", secondary: "Blink", view: "View" },
-        telekinesis: { jump: "Jump", sprint: "Run", attack: "Hold", secondary: "Focus", view: "View" },
+        telekinesis: { jump: levitationBootsActivated ? "Jump/Float" : "Jump", sprint: "Run", attack: equippedHotbarItem()?.id === "levitationBoots" && !levitationBootsActivated && !levitationBootsActive() ? "Boots" : "Hold", secondary: "Focus", view: "View" },
         flight: { jump: flightMode ? "Fly" : "Jump/Fly", sprint: flightMode ? "Turbo" : "Charge", attack: flightMode ? "Dive" : "Feathers", secondary: "Aerial", view: "View" },
         robot: { jump: "Lift", sprint: "Thrust", attack: "Beam", secondary: "Shield", view: "View" },
         jump: { jump: "Jump", sprint: "Run", attack: "Mega", secondary: "Skill", view: "View" },
@@ -9722,6 +10020,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       setMobileKey("Space", true);
+      if (selectedPower === "telekinesis") tryStartLevitationBoots();
       if (selectedPower === "fire" && !isGrounded()) useFlameUpDash();
       if (selectedPower === "webs") {
         if (webWallWalkActive) jumpOffSpiderWall();
@@ -9941,6 +10240,10 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
       const current = available.indexOf(selectedHotbarIndex);
       const next = current + direction;
       if (next < 0 || next >= available.length) {
+        if (selectedPower === "telekinesis" && selectedHotbarIndex === 0) {
+          if (onlineMode && multiplayerClient?.id) multiplayerClient.sendAction({ kind: "inventory-equip", item: null });
+          else clearLocalLevitationBoots({ keepCooldown: true, announce: true });
+        }
         selectedHotbarIndex = null;
         renderHotbar();
         showMessage("Hands free — normal abilities", 700);
@@ -10101,6 +10404,7 @@ import { MultiplayerClient, createRoomCode, normalizeRoomCode } from "./multipla
         return;
       }
       keys.add(event.code);
+      if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "telekinesis") tryStartLevitationBoots();
       if (event.code === "Space" && !event.repeat && gameStarted && selectedPower === "fire" && !isGrounded()) useFlameUpDash();
       if (/^Digit[1-9]$/.test(event.code) && gameStarted && !event.repeat) {
         selectHotbarSlot(Number(event.code.slice(5)) - 1);

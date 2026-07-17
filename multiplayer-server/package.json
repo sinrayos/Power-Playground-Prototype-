@@ -11,6 +11,7 @@
     "test:local:duels": "node test/duels-local.mjs",
     "test:local:rules": "node test/mode-rules-local.mjs",
     "test:local:fire": "node test/fire-local.mjs",
+    "test:local:levitation": "node test/levitation-boots-local.mjs",
     "test:local:train": "node test/train-local.mjs"
   },
   "devDependencies": {
